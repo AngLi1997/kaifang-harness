@@ -31,6 +31,7 @@ import { DesktopOnboardingEntry, type DesktopOnboardingInjected } from './Deskto
 import { readOnboardingApiKeyPresence } from './onboarding-credentials.ts'
 import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
+import { kaifangBridge, type KaifangAccount } from './kaifang-account.ts'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
 export type { AccountSnapshot } from './AccountSection.tsx'
@@ -147,6 +148,19 @@ export function apply(ctx: Context): void {
       void refresh()
     }
   })().catch(() => { if (!disposed) publish({ ...snapshot, failed: true }) })
+  const kaifang = kaifangBridge(globalThis)
+  if (kaifang !== undefined) {
+    const show = (account: KaifangAccount | null): void => {
+      const { kaifang: _replaced, ...withoutKaifang } = snapshot
+      // exactOptionalPropertyTypes distinguishes an absent account from an undefined one.
+      publish(account === null ? withoutKaifang : { ...withoutKaifang, kaifang: account })
+    }
+    let changed = false
+    ctx.effect(() => kaifang.subscribe((account) => { changed = true; show(account) }), 'account: KaifangLab identity')
+    void kaifang.current().then((account) => { if (!changed && !disposed) show(account) }, (error: unknown) => {
+      console.error('[kaifang-account] account read failed', error)
+    })
+  }
   const nativePlatform = (globalThis as typeof globalThis & { dshPlatform?: PlatformBridge }).dshPlatform
   // One request channel for the single native Platform view. It always exists
   // so every entry can observe whether a page is showing; only a native bridge
@@ -252,6 +266,7 @@ export function apply(ctx: Context): void {
       if (result.ok) return
       throw result.error
     },
+    ...kaifang === undefined ? {} : { kaifangSignOut: () => kaifang.signOut() },
   }
   if (desktop) {
     const controller = new DesktopOnboardingController(

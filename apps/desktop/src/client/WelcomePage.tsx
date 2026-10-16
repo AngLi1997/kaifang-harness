@@ -4,9 +4,9 @@ import type { FormEvent } from 'react'
 import { Toast } from '@deepseek-ai/dsh-client-ui-primitives/src/Toast.tsx'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives/src/StateDot.tsx'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { SystemConnectionSaveResult, WelcomeApi } from '../welcome-api.ts'
+import type { PasswordSignInResult, SystemConnectionSaveResult, WelcomeApi } from '../welcome-api.ts'
 
-type Page = 'entry' | 'account' | 'settings'
+type Page = 'entry' | 'account' | 'settings' | 'password'
 
 /**
  * Render the standalone welcome flow using shell-owned operations and localized copy.
@@ -31,20 +31,29 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   const mounted = useRef(true)
   const revision = useRef(0)
   const [systemUrl, setSystemUrl] = useState('')
+  const [webUrl, setWebUrl] = useState('')
   const [authCode, setAuthCode] = useState('')
-  const [settingsError, setSettingsError] = useState<{ field: 'url' | 'code' | 'form'; text: string } | null>(null)
+  const [settingsError, setSettingsError] = useState<{ field: 'url' | 'web' | 'code' | 'form'; text: string } | null>(null)
   const [savedNotice, setSavedNotice] = useState(false)
   const urlInput = useRef<HTMLInputElement>(null)
+  const webUrlInput = useRef<HTMLInputElement>(null)
   const codeInput = useRef<HTMLInputElement>(null)
   const settingsButton = useRef<HTMLButtonElement>(null)
   const focusEntry = useRef(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState<{ field: 'username' | 'password' | 'form'; text: string } | null>(null)
+  const usernameInput = useRef<HTMLInputElement>(null)
+  const passwordInput = useRef<HTMLInputElement>(null)
+  const passwordEntryButton = useRef<HTMLButtonElement>(null)
+  const focusPasswordEntry = useRef(false)
 
   function navigate(next: Page) {
     pageRef.current = next
     setPage(next)
   }
   function showAccount(state: AccountView) {
-    if (pageRef.current === 'settings' || (state.attempt === null && pageRef.current === 'entry')) return
+    if (pageRef.current === 'settings' || pageRef.current === 'password' || (state.attempt === null && pageRef.current === 'entry')) return
     attemptRef.current = state.attempt
     setAttempt(state.attempt)
     setStarting(false)
@@ -76,7 +85,11 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     if (page === 'entry' && visiblePage.current !== 'entry') void api.analytics?.('auth_page_view', {})
     visiblePage.current = page
     if (page === 'settings') urlInput.current?.focus()
-    else if (page === 'entry' && focusEntry.current) {
+    else if (page === 'password') usernameInput.current?.focus()
+    else if (page === 'entry' && focusPasswordEntry.current) {
+      focusPasswordEntry.current = false
+      passwordEntryButton.current?.focus()
+    } else if (page === 'entry' && focusEntry.current) {
       focusEntry.current = false
       settingsButton.current?.focus()
     }
@@ -95,6 +108,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       const saved = await api.readSystemConnection()
       if (!mounted.current) return
       setSystemUrl(saved.systemUrl)
+      setWebUrl(saved.webUrl)
       setAuthCode(saved.authCode)
     } catch {
       if (mounted.current) setSettingsError({ field: 'form', text: m.welcomeSettingsFailed })
@@ -111,6 +125,8 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     switch (result.reason) {
       case 'url-required': return { field: 'url', text: m.welcomeSystemUrlRequired } as const
       case 'url-invalid': return { field: 'url', text: m.welcomeSystemUrlInvalid } as const
+      case 'web-url-required': return { field: 'web', text: m.welcomeWebUrlRequired } as const
+      case 'web-url-invalid': return { field: 'web', text: m.welcomeSystemUrlInvalid } as const
       case 'auth-code-required': return { field: 'code', text: m.welcomeAuthCodeRequired } as const
       case 'write-failed': return { field: 'form', text: m.welcomeSettingsFailed } as const
       default: {
@@ -123,17 +139,19 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     event.preventDefault()
     if (busyRef.current) return
     const local = systemUrl.trim() === '' ? settingsFailure({ ok: false, reason: 'url-required' })
-      : authCode.trim() === '' ? settingsFailure({ ok: false, reason: 'auth-code-required' }) : null
+      : webUrl.trim() === '' ? settingsFailure({ ok: false, reason: 'web-url-required' })
+        : authCode.trim() === '' ? settingsFailure({ ok: false, reason: 'auth-code-required' }) : null
+    const settingsInput = (field: 'url' | 'web' | 'code' | 'form') => field === 'code' ? codeInput : field === 'web' ? webUrlInput : urlInput
     if (local !== null) {
       setSettingsError(local)
-      ;(local.field === 'code' ? codeInput : urlInput).current?.focus()
+      settingsInput(local.field).current?.focus()
       return
     }
     busyRef.current = true
     setBusy(true)
     setSettingsError(null)
     try {
-      const result = await api.saveSystemConnection({ systemUrl: systemUrl.trim(), authCode: authCode.trim() })
+      const result = await api.saveSystemConnection({ systemUrl: systemUrl.trim(), webUrl: webUrl.trim(), authCode: authCode.trim() })
       if (!mounted.current) return
       if (result.ok) {
         setSavedNotice(true)
@@ -142,10 +160,61 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       } else {
         const failure = settingsFailure(result)
         setSettingsError(failure)
-        if (failure.field !== 'form') (failure.field === 'code' ? codeInput : urlInput).current?.focus()
+        if (failure.field !== 'form') settingsInput(failure.field).current?.focus()
       }
     } catch {
       if (mounted.current) setSettingsError({ field: 'form', text: m.welcomeSettingsFailed })
+    } finally {
+      busyRef.current = false
+      if (mounted.current) setBusy(false)
+    }
+  }
+  function openPassword() {
+    setPasswordError(null)
+    setPassword('')
+    navigate('password')
+  }
+  function leavePassword() {
+    if (busyRef.current) return
+    setPasswordError(null)
+    setPassword('')
+    focusPasswordEntry.current = true
+    navigate('entry')
+  }
+  function passwordFailure(result: Exclude<PasswordSignInResult, { ok: true }>) {
+    switch (result.reason) {
+      case 'username-required': return { field: 'username', text: m.welcomeUsernameRequired } as const
+      case 'password-required': return { field: 'password', text: m.welcomePasswordRequired } as const
+      case 'invalid-credentials': return { field: 'form', text: m.welcomePasswordInvalid } as const
+      case 'unreachable': return { field: 'form', text: m.welcomePasswordUnreachable } as const
+      case 'failed': return { field: 'form', text: m.welcomePasswordFailed } as const
+      default: {
+        const unknownReason: never = result.reason
+        throw new Error(`desktop welcome: unknown password sign-in failure ${String(unknownReason)}`)
+      }
+    }
+  }
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault()
+    if (busyRef.current) return
+    const local = username.trim() === '' ? passwordFailure({ ok: false, reason: 'username-required' })
+      : password === '' ? passwordFailure({ ok: false, reason: 'password-required' }) : null
+    if (local !== null) {
+      setPasswordError(local)
+      ;(local.field === 'password' ? passwordInput : usernameInput).current?.focus()
+      return
+    }
+    busyRef.current = true
+    setBusy(true)
+    setPasswordError(null)
+    try {
+      const result = await api.passwordSignIn({ username: username.trim(), password })
+      if (!mounted.current || result.ok) return
+      const failure = passwordFailure(result)
+      setPasswordError(failure)
+      ;(failure.field === 'username' ? usernameInput : passwordInput).current?.focus()
+    } catch {
+      if (mounted.current) setPasswordError({ field: 'form', text: m.welcomePasswordFailed })
     } finally {
       busyRef.current = false
       if (mounted.current) setBusy(false)
@@ -195,7 +264,8 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   const title = phase === 'initializing' ? m.welcomeAuthStarting
     : waiting ? m.welcomeAuthWaiting : phase === 'expired' ? m.welcomeAuthExpired
       : phase === 'failed' ? m.welcomeAuthFailed : m.welcomeAuthExchanging
-  const heading = page === 'entry' ? 'welcome-heading' : page === 'settings' ? 'settings-title' : 'auth-status'
+  const heading = page === 'entry' ? 'welcome-heading' : page === 'settings' ? 'settings-title'
+    : page === 'password' ? 'password-title' : 'auth-status'
 
   return <>
     {expiryNotice && <Toast text={m.welcomeSessionExpired} onDone={() => { setExpiryNotice(false) }} />}
@@ -221,11 +291,37 @@ export function Welcome({ api }: { api: WelcomeApi }) {
             <p id="system-url-error" className="key-error" role="alert" hidden={settingsError?.field !== 'url'}>{settingsError?.field === 'url' ? settingsError.text : ''}</p>
           </div>
           <div className="key-field">
+            <label className="field-label" htmlFor="web-url">{m.welcomeWebUrl}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={webUrlInput} id="web-url" type="url" autoComplete="off" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="web-url-error" aria-invalid={settingsError?.field === 'web'} placeholder={m.welcomeWebUrlPlaceholder}
+              value={webUrl} disabled={busy} onChange={(event) => { setWebUrl(event.target.value); setSettingsError(null) }} />
+            <p id="web-url-error" className="key-error" role="alert" hidden={settingsError?.field !== 'web'}>{settingsError?.field === 'web' ? settingsError.text : ''}</p>
+          </div>
+          <div className="key-field">
             <label className="field-label" htmlFor="auth-code">{m.welcomeAuthCode}<span className="required" aria-hidden="true">*</span></label>
             <input ref={codeInput} id="auth-code" type="password" autoComplete="off" autoCapitalize="off" spellCheck={false} required
               aria-describedby="auth-code-error" aria-invalid={settingsError?.field === 'code'} placeholder={m.welcomeAuthCodePlaceholder}
               value={authCode} disabled={busy} onChange={(event) => { setAuthCode(event.target.value); setSettingsError(null) }} />
-            <p id="auth-code-error" className="key-error" role="alert" hidden={settingsError?.field === 'url' || settingsError === null}>{settingsError !== null && settingsError.field !== 'url' ? settingsError.text : ''}</p>
+            <p id="auth-code-error" className="key-error" role="alert" hidden={settingsError === null || settingsError.field === 'url' || settingsError.field === 'web'}>{settingsError !== null && (settingsError.field === 'code' || settingsError.field === 'form') ? settingsError.text : ''}</p>
+          </div>
+        </div>
+      </form>
+      <form id="password-form" className="key-form settings-form" hidden={page !== 'password'} noValidate onSubmit={(event) => { void submitPassword(event) }} aria-busy={busy}>
+        <header className="key-heading"><h1 id="password-title">{m.welcomePasswordTitle}</h1><p id="password-description">{m.welcomePasswordDescription}</p></header>
+        <div className="settings-fields">
+          <div className="key-field">
+            <label className="field-label" htmlFor="username">{m.welcomeUsername}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={usernameInput} id="username" type="text" autoComplete="username" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="username-error" aria-invalid={passwordError?.field === 'username'} placeholder={m.welcomeUsernamePlaceholder}
+              value={username} disabled={busy} onChange={(event) => { setUsername(event.target.value); setPasswordError(null) }} />
+            <p id="username-error" className="key-error" role="alert" hidden={passwordError?.field !== 'username'}>{passwordError?.field === 'username' ? passwordError.text : ''}</p>
+          </div>
+          <div className="key-field">
+            <label className="field-label" htmlFor="password">{m.welcomePassword}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={passwordInput} id="password" type="password" autoComplete="current-password" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="password-error" aria-invalid={passwordError !== null && passwordError.field !== 'username'} placeholder={m.welcomePasswordPlaceholder}
+              value={password} disabled={busy} onChange={(event) => { setPassword(event.target.value); setPasswordError(null) }} />
+            <p id="password-error" className="key-error" role="alert" hidden={passwordError === null || passwordError.field === 'username'}>{passwordError !== null && passwordError.field !== 'username' ? passwordError.text : ''}</p>
           </div>
         </div>
       </form>
@@ -248,6 +344,14 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       </div>
       <div id="entry-actions" className="actions" hidden={page !== 'entry'}>
         <button id="sign-in" className="primary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeSignIn}</button>
+        <button ref={passwordEntryButton} id="password-sign-in" className="secondary" type="button" onClick={openPassword}>{m.welcomePasswordSignIn}</button>
+      </div>
+      <div id="password-actions" className="actions" hidden={page !== 'password'}>
+        <button id="submit-password" className="primary" type="submit" form="password-form" disabled={busy}
+          aria-label={busy ? m.welcomeAuthExchanging : undefined}>
+          {busy && page === 'password' ? <StateDot state="ongoing" size={16} className="welcome-loading" /> : m.welcomePasswordSubmit}
+        </button>
+        <button id="password-back" className="secondary" type="button" disabled={busy} onClick={leavePassword}>{m.welcomeSettingsBack}</button>
       </div>
       <div id="settings-actions" className="actions" hidden={page !== 'settings'}>
         <button id="save-settings" className="primary" type="submit" form="settings-form" disabled={busy}>{m.welcomeSettingsSave}</button>

@@ -11,6 +11,7 @@ import { AccountAvatar } from './AccountAvatar.tsx'
 import type { AccountAvatarSnapshot } from './account-avatar.ts'
 import { authorizeUrlWithTheme } from './authorize-url.ts'
 import type { BonusNotice } from './bonus-notices.ts'
+import type { KaifangAccount } from './kaifang-account.ts'
 import css from './AccountSection.module.css'
 
 /** Safe account snapshot shared by the settings page and launcher. */
@@ -20,6 +21,8 @@ export interface AccountSnapshot {
 
   /** Latest Host state, absent until the stream responds. */
   view: AccountView | undefined
+  /** Desktop KaifangLab account; absent while signed out and in ordinary browsers. The launcher shows it before the DeepSeek account. */
+  kaifang?: KaifangAccount
   /** Sanitized profile and balance query outcomes, absent while loading. */
   details: Partial<AccountDetails> | undefined
   /** Shared picture load; absent until a profile supplies a picture or after sign-out. */
@@ -85,6 +88,8 @@ export interface AccountSectionInjected {
   hasRunningAccountTasks: () => Promise<boolean>
   /** @returns after local account credentials are removed. */
   signOut: () => Promise<void>
+  /** Desktop-only: remove the KaifangLab session; absent when the Desktop bridge does not provide it. */
+  kaifangSignOut?: () => Promise<void>
 }
 /** Composed account section props. */
 export type AccountSectionProps =

@@ -47,8 +47,9 @@ const operations = {
   copySignInLink: async () => undefined,
   saveApiKey: () => Promise.resolve({ ok: true as const }),
   skip: () => Promise.resolve(),
-  readSystemConnection: () => Promise.resolve({ systemUrl: 'http://127.0.0.1:9999', authCode: '' }),
+  readSystemConnection: () => Promise.resolve({ systemUrl: 'http://127.0.0.1:9999', webUrl: 'http://localhost:5173', authCode: '' }),
   saveSystemConnection: () => Promise.resolve({ ok: true as const }),
+  passwordSignIn: () => Promise.resolve({ ok: true as const }),
 }
 
 describe('desktop welcome window', () => {
@@ -121,7 +122,8 @@ describe('desktop welcome window', () => {
     const copySignInLink = vi.fn(operations.copySignInLink)
     const takeNotice = vi.fn(async () => 'session-expired' as const)
     const saveSystemConnection = vi.fn(operations.saveSystemConnection)
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice, saveSystemConnection })
+    const passwordSignIn = vi.fn(operations.passwordSignIn)
+    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice, saveSystemConnection, passwordSignIn })
     const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
     const take = electron.handlers.get(WELCOME_IPC.takeNotice)!
     await expect(take({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
@@ -141,8 +143,17 @@ describe('desktop welcome window', () => {
     expect(await saveConnection(own, { systemUrl: 'ftp://a.test', authCode: 'c' })).toEqual({ ok: false, reason: 'url-invalid' })
     expect(await saveConnection(own, { systemUrl: 'http://a.test', authCode: ' ' })).toEqual({ ok: false, reason: 'auth-code-required' })
     expect(saveSystemConnection).not.toHaveBeenCalled()
-    expect(await saveConnection(own, { systemUrl: ' http://a.test ', authCode: ' c ' })).toEqual({ ok: true })
-    expect(saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'http://a.test', authCode: 'c' })
+    expect(await saveConnection(own, { systemUrl: 'http://a.test', webUrl: 'file:///x', authCode: 'c' })).toEqual({ ok: false, reason: 'web-url-invalid' })
+    expect(saveSystemConnection).not.toHaveBeenCalled()
+    expect(await saveConnection(own, { systemUrl: ' http://a.test ', webUrl: ' http://web.test ', authCode: ' c ' })).toEqual({ ok: true })
+    expect(saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'http://a.test', webUrl: 'http://web.test', authCode: 'c' })
+    const signIn = electron.handlers.get(WELCOME_IPC.passwordSignIn)!
+    await expect(signIn({ ...own, senderFrame: {} }, { username: 'admin', password: 'p' })).rejects.toThrow('unowned frame')
+    expect(await signIn(own, { username: ' ', password: 'p' })).toEqual({ ok: false, reason: 'username-required' })
+    expect(await signIn(own, { username: 'admin', password: '' })).toEqual({ ok: false, reason: 'password-required' })
+    expect(passwordSignIn).not.toHaveBeenCalled()
+    expect(await signIn(own, { username: ' admin ', password: ' p ' })).toEqual({ ok: true })
+    expect(passwordSignIn).toHaveBeenCalledExactlyOnceWith({ username: 'admin', password: ' p ' })
     const copy = electron.handlers.get(WELCOME_IPC.copyLink)!
     await expect(copy({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
     await expect(copy(own, 42)).rejects.toThrow('invalid attempt')
@@ -190,11 +201,12 @@ describe('desktop welcome window', () => {
     expect(electron.handlers.size).toBe(0)
   })
 
-  it('shows the entry after logout only without a separately configured API key', () => {
-    expect(needsWelcome({ loggedIn: true, hasApiKey: false })).toBe(false)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: false })).toBe(true)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: true })).toBe(false)
-    expect(needsWelcome({ loggedIn: true, hasApiKey: true })).toBe(false)
+  it('shows the entry after logout only without a separately configured API key or KaifangLab session', () => {
+    expect(needsWelcome({ loggedIn: true, hasApiKey: false, kaifangSignedIn: false })).toBe(false)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: false, kaifangSignedIn: false })).toBe(true)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: true, kaifangSignedIn: false })).toBe(false)
+    expect(needsWelcome({ loggedIn: true, hasApiKey: true, kaifangSignedIn: false })).toBe(false)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: false, kaifangSignedIn: true })).toBe(false)
   })
 })
 

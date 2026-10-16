@@ -17,24 +17,41 @@ export const WELCOME_IPC = {
   takeNotice: 'dsh-welcome:take-notice',
   readSystemConnection: 'dsh-welcome:read-system-connection',
   saveSystemConnection: 'dsh-welcome:save-system-connection',
+  passwordSignIn: 'dsh-welcome:password-sign-in',
 } as const
 
 /** Credential writes return a safe outcome without exposing Host diagnostics. */
 export type WelcomeSaveResult = { readonly ok: true } | { readonly ok: false }
 
-/** System endpoint and authorization code; both are required once saved. */
+/** KaifangLab API endpoint, its browser sign-in page, and authorization code; all are required once saved. */
 export interface SystemConnection {
   readonly systemUrl: string
+  /** KaifangLab Web origin whose `/authorize` page completes browser sign-in. */
+  readonly webUrl: string
   readonly authCode: string
 }
 
 /** Validation failure reported to the welcome form without exposing filesystem diagnostics. */
-export type SystemConnectionInvalid = 'url-required' | 'url-invalid' | 'auth-code-required'
+export type SystemConnectionInvalid = 'url-required' | 'url-invalid' | 'web-url-required' | 'web-url-invalid' | 'auth-code-required'
 
 /** System connection writes return a field rule failure or a safe write failure. */
 export type SystemConnectionSaveResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: SystemConnectionInvalid | 'write-failed' }
+
+/** KaifangLab account credentials entered on the password sign-in page. */
+export interface PasswordCredentials {
+  readonly username: string
+  readonly password: string
+}
+
+/**
+ * Password sign-in outcome; failures carry no server diagnostics.
+ * `unreachable` covers transport failures to the configured system URL, `failed` an unexpected response or local write failure.
+ */
+export type PasswordSignInResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: 'username-required' | 'password-required' | 'invalid-credentials' | 'unreachable' | 'failed' }
 
 /** One-time notification retained by the main process until Welcome receives it. */
 export type WelcomeNotice = 'session-expired'
@@ -71,6 +88,12 @@ export interface WelcomeOperations {
    */
   saveSystemConnection(value: SystemConnection): Promise<SystemConnectionSaveResult>
   /**
+   * Authenticate against the KaifangLab system URL saved in settings, then enter the workspace.
+   * @param value - username and password entered in the password sign-in page.
+   * @returns the sign-in outcome; success resolves after the workspace opens.
+   */
+  passwordSignIn(value: PasswordCredentials): Promise<PasswordSignInResult>
+  /**
    * Enter the workspace without writing an onboarding-completion setting.
    * @returns completion after the workspace opens.
    */
@@ -87,13 +110,15 @@ export type WelcomeApi = DesktopLocale & WelcomeOperations & {
 export interface WelcomeAuthentication {
   readonly loggedIn: boolean
   readonly hasApiKey: boolean
+  /** Whether a KaifangLab password session for the configured system URL is stored and unexpired. */
+  readonly kaifangSignedIn: boolean
 }
 
 /**
  * Decide whether a startup or sign-out requires the welcome entry.
- * @param authentication - current account and independently stored API-key facts.
- * @returns true only when neither authentication route is configured.
+ * @param authentication - current account, KaifangLab session, and independently stored API-key facts.
+ * @returns true only when no authentication route is configured.
  */
 export function needsWelcome(authentication: WelcomeAuthentication): boolean {
-  return !authentication.loggedIn && !authentication.hasApiKey
+  return !authentication.loggedIn && !authentication.hasApiKey && !authentication.kaifangSignedIn
 }

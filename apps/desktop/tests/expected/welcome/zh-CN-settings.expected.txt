@@ -1,8 +1,9 @@
 KaifangHarness
 KaifangHarness
 系统设置
-配置系统地址与授权码
+配置系统地址、认证页面与授权码
 系统 URL*: http://127.0.0.1:9999
+认证页面 URL*: http://localhost:5173
 授权码*: 请输入授权码 [password]
 保存
 返回

@@ -3,7 +3,7 @@ import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
@@ -516,6 +516,23 @@ describe('desktop main startup', () => {
     }
     expect(forwardWebRequest).not.toHaveBeenCalled()
     expect((await handler(new Request('dsh-app://unknown/update-dialog.html'))).status).toBe(404)
+  })
+
+  it('offers KaifangLab sign-out only while a session is stored and removes it on click', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'darwin' })
+    const directory = join(harness.app.getPath('userData'), 'desktop')
+    mkdirSync(directory, { recursive: true })
+    const session = join(directory, 'kaifang-session.json')
+    writeFileSync(session, JSON.stringify({ systemUrl: 'http://127.0.0.1:9999', accessToken: 't', expiresAt: null,
+      user: { username: 'admin', displayName: 'Admin', email: null, avatarUrl: null } }))
+    await readyForUpdate()
+    const latestItems = () => harness.menu.mock.lastCall![0][0]!.submenu as MenuItemConstructorOptions[]
+    await vi.waitFor(() => { expect(latestItems().some(item => item.label === en.kaifangSignOutMenu)).toBe(true) })
+    ;(latestItems().find(item => item.label === en.kaifangSignOutMenu)!.click as () => void)()
+    await vi.waitFor(() => { expect(existsSync(session)).toBe(false) })
+    await vi.waitFor(() => { expect(latestItems().some(item => item.label === en.kaifangSignOutMenu)).toBe(false) })
+    // The default host still reports an API key, so the workspace stays open without the welcome window.
+    expect(harness.windows).toHaveLength(1)
   })
 
   it('installs hidden native DevTools shortcuts in the macOS application menu', async () => {

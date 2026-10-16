@@ -3,4 +3,5 @@ KaifangHarness
 Welcome to KaifangHarness
 Rules as our measure. Building and creating together.
 Sign in
+Sign in with password
 Settings

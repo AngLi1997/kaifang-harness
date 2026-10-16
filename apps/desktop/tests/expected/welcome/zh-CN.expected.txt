@@ -3,4 +3,5 @@ KaifangHarness
 欢迎使用 KaifangHarness
 以规为尺，共筑共创。
 登录
+账号密码登录
 设置

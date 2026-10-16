@@ -371,7 +371,7 @@ body {
 .settings-fields {
   display: flex;
   flex-direction: column;
-  gap: 36px;
+  gap: 24px;
   width: 100%;
 }
 

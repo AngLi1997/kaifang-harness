@@ -7,11 +7,21 @@ import { join } from 'node:path'
 import type { SystemConnection, SystemConnectionInvalid } from './welcome-api.ts'
 
 /** Value shown before the user saves a connection; the authorization code has no default. */
-export const DEFAULT_SYSTEM_CONNECTION: SystemConnection = { systemUrl: 'http://127.0.0.1:9999', authCode: '' }
+export const DEFAULT_SYSTEM_CONNECTION: SystemConnection = { systemUrl: 'http://127.0.0.1:9999', webUrl: 'http://localhost:5173', authCode: '' }
+
+function httpUrl(value: string): boolean {
+  let url: URL
+  try { url = new URL(value) } catch (_invalidUrl) {
+    // An unparsable URL is a form error, not an operation failure.
+    return false
+  }
+  return url.protocol === 'http:' || url.protocol === 'https:'
+}
 
 /**
  * Normalize user input into a saveable connection.
- * @param value - untrusted renderer input.
+ * A document saved before the Web URL existed omits it and receives the default.
+ * @param value - untrusted renderer input or saved document.
  * @returns the trimmed connection, or the first failed field rule.
  */
 export function validateSystemConnection(
@@ -19,16 +29,15 @@ export function validateSystemConnection(
 ): { ok: true; value: SystemConnection } | { ok: false; reason: SystemConnectionInvalid } {
   const input = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
   const systemUrl = typeof input.systemUrl === 'string' ? input.systemUrl.trim() : ''
+  const webUrl = input.webUrl === undefined ? DEFAULT_SYSTEM_CONNECTION.webUrl
+    : typeof input.webUrl === 'string' ? input.webUrl.trim() : ''
   const authCode = typeof input.authCode === 'string' ? input.authCode.trim() : ''
   if (systemUrl === '') return { ok: false, reason: 'url-required' }
-  let url: URL
-  try { url = new URL(systemUrl) } catch (_invalidUrl) {
-    // An unparsable URL is a form error, not an operation failure.
-    return { ok: false, reason: 'url-invalid' }
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return { ok: false, reason: 'url-invalid' }
+  if (!httpUrl(systemUrl)) return { ok: false, reason: 'url-invalid' }
+  if (webUrl === '') return { ok: false, reason: 'web-url-required' }
+  if (!httpUrl(webUrl)) return { ok: false, reason: 'web-url-invalid' }
   if (authCode === '') return { ok: false, reason: 'auth-code-required' }
-  return { ok: true, value: { systemUrl, authCode } }
+  return { ok: true, value: { systemUrl, webUrl, authCode } }
 }
 
 function path(userData: string): string {

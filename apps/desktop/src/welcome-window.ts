@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
 import type { DesktopLocale } from './locale.ts'
+import { validatePasswordCredentials } from './kaifang-auth.ts'
 import { validateSystemConnection } from './system-connection.ts'
 import { WELCOME_IPC, type WelcomeOperations } from './welcome-api.ts'
 
@@ -68,7 +69,7 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     for (const channel of [
       WELCOME_IPC.analyticsEnabled, WELCOME_IPC.analytics, WELCOME_IPC.takeNotice, WELCOME_IPC.saveApiKey,
       WELCOME_IPC.skip, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
-      WELCOME_IPC.readSystemConnection, WELCOME_IPC.saveSystemConnection,
+      WELCOME_IPC.readSystemConnection, WELCOME_IPC.saveSystemConnection, WELCOME_IPC.passwordSignIn,
     ]) {
       ipcMain.removeHandler(channel)
     }
@@ -106,6 +107,12 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     const parsed = validateSystemConnection(value)
     if (!parsed.ok) return { ok: false, reason: parsed.reason }
     return operations.saveSystemConnection(parsed.value)
+  })
+  ipcMain.handle(WELCOME_IPC.passwordSignIn, async (event, value: unknown) => {
+    assertSender(event)
+    const parsed = validatePasswordCredentials(value)
+    if (!parsed.ok) return { ok: false, reason: parsed.reason }
+    return operations.passwordSignIn(parsed.value)
   })
   ipcMain.handle(WELCOME_IPC.skip, async (event) => {
     assertSender(event)

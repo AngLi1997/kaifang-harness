@@ -730,3 +730,28 @@ it.each(['desktopOnboardingVisible', 'onboarding'] as const)('defers bonus displ
   await vi.waitFor(() => { expect(operations.bonusNoticeShown).toHaveBeenCalledExactlyOnceWith(notice.orderId) })
   expect(screen.getByText(notice.message)).toBeTruthy()
 })
+
+it.each([en, zh])('shows the Desktop KaifangLab account in the launcher and signs it out', async (copy) => {
+  const base = operationsOf({ status: 'signed-out', attempt: null })
+  const kaifangSignOut = vi.fn(() => Promise.resolve())
+  const kaifang = { username: 'admin', displayName: '管理员', email: 'admin@example.test', avatarUrl: 'http://localhost:5173/favicon.png' }
+  const snapshot = { ...base.hooks.account.getSnapshot(), kaifang }
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  render(<AccountMenu {...({} as GlobalStandardProps)} {...base} kaifangSignOut={kaifangSignOut} settingsOpen={false}
+    useAccount={selector => selector(snapshot)}
+    useTheme={selector => selector(base.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    t={key => key in copy ? copy[key as AccountKey] : key} />)
+  const trigger = screen.getByRole('button', { name: copy.menu })
+  expect(trigger.textContent).toBe('管理员')
+  const picture = trigger.querySelector('img')!
+  expect(picture.getAttribute('src')).toBe('http://localhost:5173/favicon.png')
+  fireEvent.error(picture)
+  expect(trigger.querySelector('img')).toBeNull()
+  expect(trigger.querySelector('svg')).not.toBeNull()
+  fireEvent.click(trigger)
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signOut])
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: copy.signOut })) })
+  expect(kaifangSignOut).toHaveBeenCalledOnce()
+  expect(base.signOut).not.toHaveBeenCalled()
+  expect(base.hasRunningAccountTasks).not.toHaveBeenCalled()
+})

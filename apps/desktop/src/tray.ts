@@ -12,6 +12,8 @@ export interface DesktopTrayOptions {
   readonly open: () => void
   /** Request quit through the same confirmation as every other quit entry. */
   readonly quit: () => void
+  /** @returns the KaifangLab sign-out action while a session is stored, otherwise undefined to hide the entry. */
+  readonly signOut?: () => (() => void) | undefined
 }
 
 /** Tray icon present for the whole run, not only while the window is hidden. */
@@ -31,10 +33,12 @@ export class DesktopTray {
     const tray = this.tray
     if (tray === undefined) return
     const { messages } = this.options.locale()
+    const signOut = this.options.signOut?.()
     tray.setToolTip(messages.aboutProduct)
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: messages.openApplication, click: () => { this.options.open() } },
       { type: 'separator' },
+      ...signOut === undefined ? [] : [{ label: messages.kaifangSignOutMenu, click: signOut }, { type: 'separator' as const }],
       { label: messages.quitApplication, click: () => { this.options.quit() } },
     ]))
   }

@@ -6,9 +6,9 @@ import { Welcome } from '../src/client/WelcomePage.tsx'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { SystemConnection, SystemConnectionSaveResult, WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
+import type { PasswordCredentials, PasswordSignInResult, SystemConnection, SystemConnectionSaveResult, WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
 
-const DEFAULT_SYSTEM_CONNECTION: SystemConnection = { systemUrl: 'http://127.0.0.1:9999', authCode: '' }
+const DEFAULT_SYSTEM_CONNECTION: SystemConnection = { systemUrl: 'http://127.0.0.1:9999', webUrl: 'http://localhost:5173', authCode: '' }
 
 const html = readFileSync(join(import.meta.dirname, '../renderer/welcome.html'), 'utf8')
 afterEach(cleanup)
@@ -29,10 +29,14 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
     skip: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     readSystemConnection: vi.fn<() => Promise<SystemConnection>>().mockResolvedValue(DEFAULT_SYSTEM_CONNECTION),
     saveSystemConnection: vi.fn<(value: SystemConnection) => Promise<SystemConnectionSaveResult>>().mockResolvedValue({ ok: true }),
+    passwordSignIn: vi.fn<(value: PasswordCredentials) => Promise<PasswordSignInResult>>().mockResolvedValue({ ok: true }),
   }
   const mounted = render(<Welcome api={api} />)
   const url = document.querySelector<HTMLInputElement>('#system-url')!
   const code = document.querySelector<HTMLInputElement>('#auth-code')!
+  const web = document.querySelector<HTMLInputElement>('#web-url')!
+  const username = document.querySelector<HTMLInputElement>('#username')!
+  const password = document.querySelector<HTMLInputElement>('#password')!
   const button = (id: string) => document.querySelector<HTMLButtonElement>(id)!
   const enter = (input: HTMLInputElement, value: string) => {
     fireEvent.change(input, { target: { value } })
@@ -45,13 +49,18 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
       document.title, document.querySelector('img')!.alt, document.getElementById(heading)!.textContent,
       ...heading === 'welcome-heading' ? [document.querySelector('#welcome-description')!.textContent] : [],
       ...heading === 'settings-title' ? [document.querySelector('#settings-description')!.textContent,
-        `${url.labels![0]!.textContent}: ${url.value || url.placeholder}`, `${code.labels![0]!.textContent}: ${code.placeholder} [password]`] : [],
+        `${url.labels![0]!.textContent}: ${url.value || url.placeholder}`, `${web.labels![0]!.textContent}: ${web.value || web.placeholder}`,
+        `${code.labels![0]!.textContent}: ${code.placeholder} [password]`] : [],
+      ...heading === 'password-title' ? [document.querySelector('#password-description')!.textContent,
+        `${username.labels![0]!.textContent}: ${username.placeholder}`, `${password.labels![0]!.textContent}: ${password.placeholder} [password]`] : [],
       ...[...document.querySelectorAll('button')].filter(item => item.closest('[hidden]') === null)
         .map(item => `${item.textContent || item.getAttribute('aria-label')}${item.disabled ? ' [disabled]' : ''}`),
       '',
     ].join('\n')
   }
-  return { document, api, url, code, button, enter, openSettings, submit, copy, unmount: mounted.unmount, stopAccount }
+  return {
+    document, api, url, web, code, username, password, button, enter, openSettings, submit, copy, unmount: mounted.unmount, stopAccount,
+  }
 }
 
 describe('desktop welcome presentation', () => {
@@ -70,17 +79,80 @@ describe('desktop welcome presentation', () => {
     await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}-settings.expected.txt`)
   })
 
+  it.each(['zh-CN', 'en'])('renders the %s password sign-in page', async (language) => {
+    const view = mount(language)
+    fireEvent.click(view.button('#password-sign-in'))
+    expect(view.document.activeElement).toBe(view.username)
+    expect(view.password.type).toBe('password')
+    await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}-password.expected.txt`)
+    fireEvent.click(view.button('#password-back'))
+    expect(view.document.querySelector<HTMLElement>('#password-form')!.hidden).toBe(true)
+    expect(view.document.activeElement).toBe(view.button('#password-sign-in'))
+  })
+
+  it('submits one trimmed account with the password unchanged and blocks competing actions', async () => {
+    const view = mount()
+    const signedIn = Promise.withResolvers<PasswordSignInResult>()
+    view.api.passwordSignIn.mockReturnValue(signedIn.promise)
+    fireEvent.click(view.button('#password-sign-in'))
+    view.enter(view.username, '  admin  ')
+    view.enter(view.password, ' secret ')
+    const form = view.document.querySelector('#password-form')!
+    fireEvent.submit(form)
+    fireEvent.submit(form)
+    fireEvent.click(view.button('#password-back'))
+    expect(view.api.passwordSignIn).toHaveBeenCalledExactlyOnceWith({ username: 'admin', password: ' secret ' })
+    expect(view.button('#submit-password').disabled).toBe(true)
+    expect(view.button('#password-back').disabled).toBe(true)
+    expect(view.api.startSignIn).not.toHaveBeenCalled()
+    await act(async () => { signedIn.resolve({ ok: true }); await signedIn.promise })
+    expect(view.document.querySelector('main')!.getAttribute('aria-labelledby')).toBe('password-title')
+  })
+
+  it.each([
+    ['', 'p', '#username-error', 'welcomeUsernameRequired'],
+    ['admin', '', '#password-error', 'welcomePasswordRequired'],
+  ] as const)('requires both credentials: %j %j', (username, password, errorId, message) => {
+    const view = mount()
+    fireEvent.click(view.button('#password-sign-in'))
+    view.enter(view.username, username)
+    view.enter(view.password, password)
+    fireEvent.submit(view.document.querySelector('#password-form')!)
+    expect(view.api.passwordSignIn).not.toHaveBeenCalled()
+    const error = view.document.querySelector<HTMLElement>(errorId)!
+    expect(error.hidden).toBe(false)
+    expect(error.textContent).toBe(view.api.messages[message])
+  })
+
+  it.each([
+    ['invalid-credentials', 'welcomePasswordInvalid'],
+    ['unreachable', 'welcomePasswordUnreachable'],
+    ['failed', 'welcomePasswordFailed'],
+  ] as const)('reports %s and allows retry', async (reason, message) => {
+    const view = mount()
+    view.api.passwordSignIn.mockResolvedValueOnce({ ok: false, reason })
+    fireEvent.click(view.button('#password-sign-in'))
+    view.enter(view.username, 'admin')
+    view.enter(view.password, 'wrong')
+    await act(async () => { fireEvent.submit(view.document.querySelector('#password-form')!) })
+    expect(view.document.querySelector('#password-error')!.textContent).toBe(view.api.messages[message])
+    expect(view.password.getAttribute('aria-invalid')).toBe('true')
+    expect(view.document.activeElement).toBe(view.password)
+    expect(view.button('#submit-password').disabled).toBe(false)
+  })
+
   it('saves one trimmed connection, prevents competing actions, and returns to the entry', async () => {
     const view = mount()
     const saved = Promise.withResolvers<SystemConnectionSaveResult>()
     view.api.saveSystemConnection.mockReturnValue(saved.promise)
     await view.openSettings()
     view.enter(view.url, '  https://kaifang.example.test  ')
+    view.enter(view.web, '  https://lab.example.test  ')
     view.enter(view.code, '  code-123  ')
     view.submit()
     view.submit()
     fireEvent.click(view.button('#settings-back'))
-    expect(view.api.saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'https://kaifang.example.test', authCode: 'code-123' })
+    expect(view.api.saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'https://kaifang.example.test', webUrl: 'https://lab.example.test', authCode: 'code-123' })
     expect(view.button('#save-settings').disabled).toBe(true)
     expect(view.button('#settings-back').disabled).toBe(true)
     await act(async () => { saved.resolve({ ok: true }); await saved.promise })
@@ -90,12 +162,14 @@ describe('desktop welcome presentation', () => {
   })
 
   it.each([
-    ['', 'code', '#system-url-error', 'welcomeSystemUrlRequired'],
-    ['http://127.0.0.1:9999', '', '#auth-code-error', 'welcomeAuthCodeRequired'],
-  ] as const)('requires both fields before saving: %j %j', async (systemUrl, authCode, errorId, message) => {
+    ['', 'http://localhost:5173', 'code', '#system-url-error', 'welcomeSystemUrlRequired'],
+    ['http://127.0.0.1:9999', ' ', 'code', '#web-url-error', 'welcomeWebUrlRequired'],
+    ['http://127.0.0.1:9999', 'http://localhost:5173', '', '#auth-code-error', 'welcomeAuthCodeRequired'],
+  ] as const)('requires every field before saving: %j %j %j', async (systemUrl, webUrl, authCode, errorId, message) => {
     const view = mount()
     await view.openSettings()
     view.enter(view.url, systemUrl)
+    view.enter(view.web, webUrl)
     view.enter(view.code, authCode)
     view.submit()
     expect(view.api.saveSystemConnection).not.toHaveBeenCalled()
@@ -129,9 +203,10 @@ describe('desktop welcome presentation', () => {
     expect(view.document.querySelector<HTMLElement>('#settings-form')!.hidden).toBe(true)
     expect(view.document.activeElement).toBe(view.button('#open-settings'))
     expect(view.api.saveSystemConnection).not.toHaveBeenCalled()
-    view.api.readSystemConnection.mockResolvedValueOnce({ systemUrl: 'http://saved.example.test', authCode: 'saved-code' })
+    view.api.readSystemConnection.mockResolvedValueOnce({ systemUrl: 'http://saved.example.test', webUrl: 'http://web.example.test', authCode: 'saved-code' })
     await view.openSettings()
     expect(view.url.value).toBe('http://saved.example.test')
+    expect(view.web.value).toBe('http://web.example.test')
     expect(view.code.value).toBe('saved-code')
   })
 
