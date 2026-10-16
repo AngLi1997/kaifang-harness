@@ -32,6 +32,8 @@ import { readOnboardingApiKeyPresence } from './onboarding-credentials.ts'
 import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
 import { kaifangBridge, type KaifangAccount } from './kaifang-account.ts'
+import { browserKaifang, KAIFANG_CALLBACK_KEY } from './kaifang-web.ts'
+import { KaifangWebSignIn, type KaifangWebSignInInjected } from './KaifangWebSignIn.tsx'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
 export type { AccountSnapshot } from './AccountSection.tsx'
@@ -148,7 +150,29 @@ export function apply(ctx: Context): void {
       void refresh()
     }
   })().catch(() => { if (!disposed) publish({ ...snapshot, failed: true }) })
-  const kaifang = kaifangBridge(globalThis)
+  // A plain browser signs in on the KaifangLab sign-in page; Desktop provides its own bridge.
+  const webKaifang = desktop || !config.kaifangSignIn ? undefined : browserKaifang(window, config.kaifangRequestTimeoutMs)
+  if (webKaifang !== undefined) {
+    const handle = (event: StorageEvent): void => {
+      if (event.key === KAIFANG_CALLBACK_KEY) void webKaifang.receiveCallback(event.newValue)
+    }
+    ctx.effect(() => {
+      window.addEventListener('storage', handle)
+      return () => { window.removeEventListener('storage', handle) }
+    }, 'account: KaifangLab browser callback')
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+      name: 'shell.overlay', id: 'kaifang-sign-in', locale: 'settings.account',
+      inject: (): KaifangWebSignInInjected => ({
+        hooks: { kaifang: { getSnapshot: () => webKaifang.snapshot(), subscribe: listener => webKaifang.watch(listener) } },
+        connection: () => webKaifang.connection(),
+        saveConnection: value => webKaifang.saveConnection(value),
+        passwordSignIn: credentials => webKaifang.passwordSignIn(credentials),
+        startBrowserSignIn: () => { webKaifang.startBrowserSignIn() },
+        cancelBrowserSignIn: () => { webKaifang.cancelBrowserSignIn() },
+      }),
+    }, KaifangWebSignIn))
+  }
+  const kaifang = kaifangBridge(globalThis) ?? webKaifang
   if (kaifang !== undefined) {
     const show = (account: KaifangAccount | null): void => {
       const { kaifang: _replaced, ...withoutKaifang } = snapshot

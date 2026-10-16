@@ -1,0 +1,37 @@
+<!doctype html>
+<!--
+  KaifangLab browser sign-in callback for the Web client. KaifangLab redirects here with `token` and `state`
+  (or `error`); the page hands them to the Harness tab through localStorage key `dsh.kaifang.callback`,
+  which accepts only the pending `state`, then removes the query from history and closes itself.
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Kaifang Harness</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font: 15px/1.6 system-ui, sans-serif; color: #282525; background: #f5f3f0; }
+    @media (prefers-color-scheme: dark) { body { color: #ece8e4; background: #1e1d1c; } }
+    p { margin: 0 16px; text-align: center; }
+  </style>
+</head>
+<body>
+  <p id="message"></p>
+  <script>
+    (function () {
+      var query = new URLSearchParams(location.search)
+      var reply = { token: query.get('token') || '', state: query.get('state') || '', error: query.get('error') || '' }
+      history.replaceState(null, '', location.pathname)
+      var stored = false
+      try { localStorage.setItem('dsh.kaifang.callback', JSON.stringify(reply)); stored = true } catch (denied) { stored = false }
+      var zh = /^zh\b/i.test(navigator.language || '')
+      var done = stored && reply.token !== ''
+      document.getElementById('message').textContent = done
+        ? (zh ? '登录成功，可以关闭此页面并返回 Kaifang Harness。' : 'Signed in. You can close this page and return to Kaifang Harness.')
+        : (zh ? '登录未完成，请关闭此页面并返回 Kaifang Harness 重试。' : 'Sign in did not complete. Close this page and try again in Kaifang Harness.')
+      if (done) window.close()
+    })()
+  </script>
+</body>
+</html>

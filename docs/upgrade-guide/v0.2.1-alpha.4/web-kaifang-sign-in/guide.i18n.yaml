@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-alpha.4/web-kaifang-sign-in/guide.md
+/:
+  en: c9713c7415ced790
+  zh: 2c05451c7d60d67d
+/the-web-app-requires-a-kaifanglab-sign-in:
+  en: ef4b2104cb9cc8d8
+  zh: f48771010e240a05
+/the-web-app-requires-a-kaifanglab-sign-in/change:
+  en: c351ef950c10176f
+  zh: c3789c1f7d31d36c
+/the-web-app-requires-a-kaifanglab-sign-in/migration:
+  en: ff5adee8c6b727f7
+  zh: 26e4a31749518e19
