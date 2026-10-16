@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
 import type { DesktopLocale } from './locale.ts'
+import { validateSystemConnection } from './system-connection.ts'
 import { WELCOME_IPC, type WelcomeOperations } from './welcome-api.ts'
 
 /**
@@ -67,6 +68,7 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     for (const channel of [
       WELCOME_IPC.analyticsEnabled, WELCOME_IPC.analytics, WELCOME_IPC.takeNotice, WELCOME_IPC.saveApiKey,
       WELCOME_IPC.skip, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
+      WELCOME_IPC.readSystemConnection, WELCOME_IPC.saveSystemConnection,
     ]) {
       ipcMain.removeHandler(channel)
     }
@@ -97,6 +99,13 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     assertSender(event)
     if (typeof value !== 'string' || !/^[\x21-\x7e]+$/.test(value)) return { ok: false }
     return operations.saveApiKey(value)
+  })
+  ipcMain.handle(WELCOME_IPC.readSystemConnection, async (event) => { assertSender(event); return operations.readSystemConnection() })
+  ipcMain.handle(WELCOME_IPC.saveSystemConnection, async (event, value: unknown) => {
+    assertSender(event)
+    const parsed = validateSystemConnection(value)
+    if (!parsed.ok) return { ok: false, reason: parsed.reason }
+    return operations.saveSystemConnection(parsed.value)
   })
   ipcMain.handle(WELCOME_IPC.skip, async (event) => {
     assertSender(event)

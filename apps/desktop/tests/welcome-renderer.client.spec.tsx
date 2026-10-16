@@ -6,7 +6,9 @@ import { Welcome } from '../src/client/WelcomePage.tsx'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
+import type { SystemConnection, SystemConnectionSaveResult, WelcomeSaveResult, WelcomeNotice } from '../src/welcome-api.ts'
+
+const DEFAULT_SYSTEM_CONNECTION: SystemConnection = { systemUrl: 'http://127.0.0.1:9999', authCode: '' }
 
 const html = readFileSync(join(import.meta.dirname, '../renderer/welcome.html'), 'utf8')
 afterEach(cleanup)
@@ -25,128 +27,112 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
     ...resolveDesktopLocale(language),
     saveApiKey: vi.fn<(value: string) => Promise<WelcomeSaveResult>>().mockResolvedValue({ ok: true }),
     skip: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    readSystemConnection: vi.fn<() => Promise<SystemConnection>>().mockResolvedValue(DEFAULT_SYSTEM_CONNECTION),
+    saveSystemConnection: vi.fn<(value: SystemConnection) => Promise<SystemConnectionSaveResult>>().mockResolvedValue({ ok: true }),
   }
   const mounted = render(<Welcome api={api} />)
-  const input = document.querySelector('input')!
+  const url = document.querySelector<HTMLInputElement>('#system-url')!
+  const code = document.querySelector<HTMLInputElement>('#auth-code')!
   const button = (id: string) => document.querySelector<HTMLButtonElement>(id)!
-  const enterKey = (value: string) => {
+  const enter = (input: HTMLInputElement, value: string) => {
     fireEvent.change(input, { target: { value } })
   }
+  const openSettings = async () => { await act(async () => { fireEvent.click(button('#open-settings')) }) }
   const submit = () => fireEvent.submit(document.querySelector('form')!)
   const copy = () => {
     const heading = document.querySelector('main')!.getAttribute('aria-labelledby')!
     return [
       document.title, document.querySelector('img')!.alt, document.getElementById(heading)!.textContent,
       ...heading === 'welcome-heading' ? [document.querySelector('#welcome-description')!.textContent] : [],
-      ...heading === 'key-title' ? [document.querySelector('#key-description')!.textContent, `${input.placeholder} [password]`] : [],
+      ...heading === 'settings-title' ? [document.querySelector('#settings-description')!.textContent,
+        `${url.labels![0]!.textContent}: ${url.value || url.placeholder}`, `${code.labels![0]!.textContent}: ${code.placeholder} [password]`] : [],
       ...[...document.querySelectorAll('button')].filter(item => item.closest('[hidden]') === null)
         .map(item => `${item.textContent || item.getAttribute('aria-label')}${item.disabled ? ' [disabled]' : ''}`),
       '',
     ].join('\n')
   }
-  return { document, api, input, button, enterKey, submit, copy, unmount: mounted.unmount, stopAccount }
+  return { document, api, url, code, button, enter, openSettings, submit, copy, unmount: mounted.unmount, stopAccount }
 }
 
 describe('desktop welcome presentation', () => {
-  it.each(['zh-CN', 'en'])('renders the %s entry and API-key step', async (language) => {
+  it.each(['zh-CN', 'en'])('renders the %s entry and settings page', async (language) => {
     const view = mount(language)
     expect(view.document.documentElement.lang).toBe(language)
-    expect(view.document.querySelector('img')!.getAttribute('src')).toBe('assets/welcome-brand.svg')
+    expect(view.document.querySelector('img')!.getAttribute('src')).toBe('assets/kaifang-logo.png')
+    expect(view.document.querySelector('#api-key')).toBeNull()
     await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}.expected.txt`)
-    fireEvent.click(view.button('#api-key'))
-    expect(view.document.activeElement).toBe(view.input)
-    expect(view.input.type).toBe('password')
-    await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}-api-key.expected.txt`)
+    await view.openSettings()
+    expect(view.api.readSystemConnection).toHaveBeenCalledOnce()
+    expect(view.document.activeElement).toBe(view.url)
+    expect(view.url.value).toBe('http://127.0.0.1:9999')
+    expect(view.code.value).toBe('')
+    expect(view.code.type).toBe('password')
+    await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}-settings.expected.txt`)
   })
 
-  it('sends one trimmed key, prevents competing actions, and clears it after saving', async () => {
+  it('saves one trimmed connection, prevents competing actions, and returns to the entry', async () => {
     const view = mount()
-    const saved = Promise.withResolvers<WelcomeSaveResult>()
-    view.api.saveApiKey.mockReturnValue(saved.promise)
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('  sk-desktop-example  ')
+    const saved = Promise.withResolvers<SystemConnectionSaveResult>()
+    view.api.saveSystemConnection.mockReturnValue(saved.promise)
+    await view.openSettings()
+    view.enter(view.url, '  https://kaifang.example.test  ')
+    view.enter(view.code, '  code-123  ')
     view.submit()
     view.submit()
-    fireEvent.click(view.button('#skip-key'))
-    fireEvent.click(view.button('#back-to-login'))
-    expect(view.api.saveApiKey).toHaveBeenCalledExactlyOnceWith('sk-desktop-example')
-    expect(view.api.skip).not.toHaveBeenCalled()
-    expect(view.button('#save-key').disabled).toBe(true)
-    expect(view.button('#save-key').textContent).toBe(view.api.messages.welcomeKeySave)
-    expect(view.button('#back-to-login').disabled).toBe(true)
-    expect(view.document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(false)
-    saved.resolve({ ok: true })
-    await vi.waitFor(() => { expect(view.input.value).toBe('') })
-    expect(view.document.body.textContent).not.toContain('sk-desktop-example')
+    fireEvent.click(view.button('#settings-back'))
+    expect(view.api.saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'https://kaifang.example.test', authCode: 'code-123' })
+    expect(view.button('#save-settings').disabled).toBe(true)
+    expect(view.button('#settings-back').disabled).toBe(true)
+    await act(async () => { saved.resolve({ ok: true }); await saved.promise })
+    expect(view.document.querySelector<HTMLElement>('#settings-form')!.hidden).toBe(true)
+    expect(view.document.activeElement).toBe(view.button('#open-settings'))
+    expect(screen.getByRole('alert').textContent).toBe(view.api.messages.welcomeSettingsSaved)
   })
 
-  it.each(['', 'bad key', '密钥', 'DEEPSEEK_API_KEY=sk-example', '"sk-example"', '`sk-example`'])(
-    'rejects invalid input before sending it: %s', (value) => {
-      const view = mount()
-      fireEvent.click(view.button('#api-key'))
-      view.enterKey(value)
-      view.submit()
-      expect(view.api.saveApiKey).not.toHaveBeenCalled()
-      expect(view.document.querySelector<HTMLElement>('#key-error')!.hidden).toBe(false)
-      expect(view.input.getAttribute('aria-invalid')).toBe('true')
-    },
-  )
-
-  it('retains an unsaved draft and allows retry after a refused save', async () => {
+  it.each([
+    ['', 'code', '#system-url-error', 'welcomeSystemUrlRequired'],
+    ['http://127.0.0.1:9999', '', '#auth-code-error', 'welcomeAuthCodeRequired'],
+  ] as const)('requires both fields before saving: %j %j', async (systemUrl, authCode, errorId, message) => {
     const view = mount()
-    view.api.saveApiKey.mockResolvedValue({ ok: false })
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('sk-retry')
+    await view.openSettings()
+    view.enter(view.url, systemUrl)
+    view.enter(view.code, authCode)
     view.submit()
-    await vi.waitFor(() => { expect(view.button('#save-key').disabled).toBe(false) })
-    expect(view.input.value).toBe('sk-retry')
-    expect(view.document.querySelector('#key-error')!.textContent).toBe(view.api.messages.welcomeKeyFailed)
-    view.api.saveApiKey.mockResolvedValue({ ok: true })
-    view.submit()
-    await vi.waitFor(() => { expect(view.input.value).toBe('') })
+    expect(view.api.saveSystemConnection).not.toHaveBeenCalled()
+    const error = view.document.querySelector<HTMLElement>(errorId)!
+    expect(error.hidden).toBe(false)
+    expect(error.textContent).toBe(view.api.messages[message])
   })
 
-  it('skips without saving and starts a fresh renderer at the entry again', async () => {
+  it('shows host validation and write failures and allows retry', async () => {
     const view = mount()
-    const skipped = Promise.withResolvers<undefined>()
-    view.api.skip.mockReturnValue(skipped.promise)
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('sk-not-saved')
-    fireEvent.click(view.button('#skip-key'))
-    try {
-      expect(view.button('#save-key').textContent).toBe(view.api.messages.welcomeKeySave)
-      expect(view.button('#skip-key').textContent).toBe(view.api.messages.welcomeKeyLater)
-      expect(view.button('#save-key').disabled).toBe(true)
-      expect(view.button('#skip-key').disabled).toBe(true)
-      expect(view.button('#back-to-login').disabled).toBe(true)
-      fireEvent.click(view.button('#skip-key'))
-      view.submit()
-      expect(view.api.skip).toHaveBeenCalledOnce()
-      expect(view.api.saveApiKey).not.toHaveBeenCalled()
-    } finally {
-      skipped.resolve(undefined)
-    }
-    await vi.waitFor(() => { expect(view.input.value).toBe('') })
-    expect(view.api.skip).toHaveBeenCalledOnce()
-    expect(view.api.saveApiKey).not.toHaveBeenCalled()
-    expect(mount().document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(true)
+    view.api.saveSystemConnection.mockResolvedValueOnce({ ok: false, reason: 'url-invalid' })
+    await view.openSettings()
+    view.enter(view.url, 'ftp://example.test')
+    view.enter(view.code, 'code')
+    await act(async () => { view.submit() })
+    expect(view.document.querySelector('#system-url-error')!.textContent).toBe(view.api.messages.welcomeSystemUrlInvalid)
+    expect(view.url.getAttribute('aria-invalid')).toBe('true')
+    view.api.saveSystemConnection.mockResolvedValueOnce({ ok: false, reason: 'write-failed' })
+    await act(async () => { view.submit() })
+    expect(view.document.querySelector('#auth-code-error')!.textContent).toBe(view.api.messages.welcomeSettingsFailed)
+    expect(view.document.querySelector<HTMLElement>('#settings-form')!.hidden).toBe(false)
+    await act(async () => { view.submit() })
+    expect(view.document.querySelector<HTMLElement>('#settings-form')!.hidden).toBe(true)
   })
 
-  it('returns to the entry without saving and clears the draft and validation error', () => {
+  it('returns to the entry without saving and reloads the saved connection next time', async () => {
     const view = mount()
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('invalid key')
-    view.submit()
-    fireEvent.click(view.button('#back-to-login'))
-    expect(view.document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(true)
-    expect(view.document.activeElement).toBe(view.button('#api-key'))
-    expect(view.input.value).toBe('')
-    expect(view.api.saveApiKey).not.toHaveBeenCalled()
-    expect(view.api.skip).not.toHaveBeenCalled()
-    fireEvent.click(view.button('#api-key'))
-    expect(view.input.value).toBe('')
-    expect(view.document.querySelector<HTMLElement>('#key-error')!.hidden).toBe(true)
-    expect(view.button('#save-key').disabled).toBe(true)
+    await view.openSettings()
+    view.enter(view.url, 'http://unsaved.example.test')
+    fireEvent.click(view.button('#settings-back'))
+    expect(view.document.querySelector<HTMLElement>('#settings-form')!.hidden).toBe(true)
+    expect(view.document.activeElement).toBe(view.button('#open-settings'))
+    expect(view.api.saveSystemConnection).not.toHaveBeenCalled()
+    view.api.readSystemConnection.mockResolvedValueOnce({ systemUrl: 'http://saved.example.test', authCode: 'saved-code' })
+    await view.openSettings()
+    expect(view.url.value).toBe('http://saved.example.test')
+    expect(view.code.value).toBe('saved-code')
   })
 
   it('keeps visible copy in the shell dictionaries and denies network access', () => {
@@ -156,17 +142,14 @@ describe('desktop welcome presentation', () => {
   })
 })
 
-it.each(['zh-CN', 'en'])('renders %s timeout with manual retry and API-key alternative', async (language) => {
+it.each(['zh-CN', 'en'])('renders %s timeout with manual retry only', async (language) => {
   const view = mount(language)
   const receive = (state: AccountView) => { act(() => { view.api.onAccountState.mock.calls[0]![0](state) }) }
   receive({ status: 'signed-out', links: { usageUrl: '', topUpUrl: '' }, attempt: { id: 'expired' as NonNullable<AccountView['attempt']>['id'], phase: 'expired' } })
   expect(view.button('#auth-retry').hidden).toBe(false)
-  expect(view.button('#auth-api-key').hidden).toBe(false)
+  expect(view.document.querySelector('#auth-api-key')).toBeNull()
   expect(view.api.startSignIn).not.toHaveBeenCalled()
   await expect(view.copy() + view.document.querySelector('#auth-description')!.textContent + '\n').toMatchFileSnapshot(`./expected/welcome/${language}-timeout.expected.txt`)
-  fireEvent.click(view.button('#auth-api-key'))
-  expect(view.document.querySelector('#auth-page')!.hasAttribute('hidden')).toBe(true)
-  expect(view.document.querySelector('#key-form')!.hasAttribute('hidden')).toBe(false)
 })
 
 it.each(['zh-CN', 'en'])('renders %s browser fallback and copies only the active login link', async (language) => {
@@ -221,14 +204,14 @@ it('does not restore a copied-link status after leaving the waiting phase', asyn
   expect(view.button('#auth-copy').textContent).toBe(view.api.messages.welcomeAuthCopyLink)
 })
 
-it('keeps the key draft while account notifications arrive and releases the subscription on unmount', () => {
+it('keeps the settings draft while account notifications arrive and releases the subscription on unmount', async () => {
   const view = mount()
-  fireEvent.click(view.button('#api-key'))
-  view.enterKey('sk-draft')
+  await view.openSettings()
+  view.enter(view.code, 'draft-code')
   act(() => { view.api.onAccountState.mock.calls[0]![0]({ status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
     attempt: { id: 'expired' as NonNullable<AccountView['attempt']>['id'], phase: 'expired' } }) })
-  expect(view.document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(false)
-  expect(view.input.value).toBe('sk-draft')
+  expect(view.document.querySelector<HTMLElement>('#settings-form')!.hidden).toBe(false)
+  expect(view.code.value).toBe('draft-code')
   view.unmount()
   expect(view.stopAccount).toHaveBeenCalledOnce()
 })
@@ -302,8 +285,8 @@ it('keeps the entry usable when notification IPC fails', async () => {
   const view = mount('en', vi.fn<() => Promise<WelcomeNotice | undefined>>().mockRejectedValue(new Error('closed')))
   await act(async () => {})
   expect(screen.queryByRole('alert')).toBeNull()
-  fireEvent.click(view.button('#api-key'))
-  expect(view.input.closest('[hidden]')).toBeNull()
+  await view.openSettings()
+  expect(view.url.closest('[hidden]')).toBeNull()
 })
 
 it('ignores a notification received after its renderer unmounts', async () => {
@@ -332,12 +315,12 @@ it.each(['zh-CN', 'en'])('returns from completed sign-in to the initial page aft
 it('reports each return to the welcome entry once, including account cancellation', async () => {
   const view = mount()
   expect(view.api.analytics).not.toHaveBeenCalled()
-  fireEvent.click(view.button('#api-key'))
-  fireEvent.click(view.button('#back-to-login'))
-  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_click', 'auth_page_view'])
+  await view.openSettings()
+  fireEvent.click(view.button('#settings-back'))
+  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_view'])
   const pending = Promise.withResolvers<AccountView>()
   view.api.startSignIn.mockReturnValueOnce(pending.promise)
   fireEvent.click(view.button('#sign-in'))
   await act(async () => { pending.resolve({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null }) })
-  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_click', 'auth_page_view', 'auth_page_click', 'auth_page_view'])
+  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_view', 'auth_page_click', 'auth_page_view'])
 })

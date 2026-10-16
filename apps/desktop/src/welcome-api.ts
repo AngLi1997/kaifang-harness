@@ -15,10 +15,26 @@ export const WELCOME_IPC = {
   copyLink: 'dsh-welcome:copy-link',
   state: 'dsh-welcome:state',
   takeNotice: 'dsh-welcome:take-notice',
+  readSystemConnection: 'dsh-welcome:read-system-connection',
+  saveSystemConnection: 'dsh-welcome:save-system-connection',
 } as const
 
 /** Credential writes return a safe outcome without exposing Host diagnostics. */
 export type WelcomeSaveResult = { readonly ok: true } | { readonly ok: false }
+
+/** System endpoint and authorization code; both are required once saved. */
+export interface SystemConnection {
+  readonly systemUrl: string
+  readonly authCode: string
+}
+
+/** Validation failure reported to the welcome form without exposing filesystem diagnostics. */
+export type SystemConnectionInvalid = 'url-required' | 'url-invalid' | 'auth-code-required'
+
+/** System connection writes return a field rule failure or a safe write failure. */
+export type SystemConnectionSaveResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: SystemConnectionInvalid | 'write-failed' }
 
 /** One-time notification retained by the main process until Welcome receives it. */
 export type WelcomeNotice = 'session-expired'
@@ -46,6 +62,14 @@ export interface WelcomeOperations {
    * @returns whether the write completed, without private error details.
    */
   saveApiKey(value: string): Promise<WelcomeSaveResult>
+  /** @returns the saved system connection, or its defaults. */
+  readSystemConnection(): Promise<SystemConnection>
+  /**
+   * Validate and persist the system connection.
+   * @param value - system URL and authorization code entered in the settings page.
+   * @returns the validation or write outcome.
+   */
+  saveSystemConnection(value: SystemConnection): Promise<SystemConnectionSaveResult>
   /**
    * Enter the workspace without writing an onboarding-completion setting.
    * @returns completion after the workspace opens.

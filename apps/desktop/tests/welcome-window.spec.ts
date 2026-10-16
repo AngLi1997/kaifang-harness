@@ -47,6 +47,8 @@ const operations = {
   copySignInLink: async () => undefined,
   saveApiKey: () => Promise.resolve({ ok: true as const }),
   skip: () => Promise.resolve(),
+  readSystemConnection: () => Promise.resolve({ systemUrl: 'http://127.0.0.1:9999', authCode: '' }),
+  saveSystemConnection: () => Promise.resolve({ ok: true as const }),
 }
 
 describe('desktop welcome window', () => {
@@ -118,7 +120,8 @@ describe('desktop welcome window', () => {
     const skip = vi.fn(operations.skip)
     const copySignInLink = vi.fn(operations.copySignInLink)
     const takeNotice = vi.fn(async () => 'session-expired' as const)
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice })
+    const saveSystemConnection = vi.fn(operations.saveSystemConnection)
+    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice, saveSystemConnection })
     const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
     const take = electron.handlers.get(WELCOME_IPC.takeNotice)!
     await expect(take({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
@@ -133,6 +136,13 @@ describe('desktop welcome window', () => {
     expect(await save(own, 'sk-test')).toEqual({ ok: true })
     await electron.handlers.get(WELCOME_IPC.skip)!(own)
     expect(skip).toHaveBeenCalledOnce()
+    const saveConnection = electron.handlers.get(WELCOME_IPC.saveSystemConnection)!
+    await expect(saveConnection({ ...own, senderFrame: {} }, { systemUrl: 'http://a.test', authCode: 'c' })).rejects.toThrow('unowned frame')
+    expect(await saveConnection(own, { systemUrl: 'ftp://a.test', authCode: 'c' })).toEqual({ ok: false, reason: 'url-invalid' })
+    expect(await saveConnection(own, { systemUrl: 'http://a.test', authCode: ' ' })).toEqual({ ok: false, reason: 'auth-code-required' })
+    expect(saveSystemConnection).not.toHaveBeenCalled()
+    expect(await saveConnection(own, { systemUrl: ' http://a.test ', authCode: ' c ' })).toEqual({ ok: true })
+    expect(saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'http://a.test', authCode: 'c' })
     const copy = electron.handlers.get(WELCOME_IPC.copyLink)!
     await expect(copy({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
     await expect(copy(own, 42)).rejects.toThrow('invalid attempt')

@@ -7,8 +7,10 @@ body {
   --dsw-alias-label-secondary: #61666b;
   --dsw-alias-label-tertiary: #81858c;
   --dsw-alias-label-primary-inverted: #fff;
-  --dsw-alias-brand-primary: var(--dsw-alias-label-primary);
-  --dsw-alias-button-primary-hover: #43454a;
+  /* Kaifang brand red (kaifang-lab primaryColor). */
+  --dsw-alias-brand-primary: #8f2428;
+  --dsw-alias-button-primary-hover: #7a1f23;
+  --dsw-alias-button-primary-label: #fff;
   --dsw-alias-button-elevated-fill: #fff;
   --dsw-alias-button-floating-hover: #f1f3f5;
   --dsw-alias-border-l2: #0000001a;
@@ -28,7 +30,8 @@ body {
     --dsw-alias-label-secondary: #cfd3d6;
     --dsw-alias-label-tertiary: #adb2b8;
     --dsw-alias-label-primary-inverted: #353638;
-    --dsw-alias-button-primary-hover: #ebeef2;
+    --dsw-alias-brand-primary: #c2484c;
+    --dsw-alias-button-primary-hover: #a5363a;
     --dsw-alias-button-elevated-fill: #43454a;
     --dsw-alias-button-floating-hover: #353638;
     --dsw-alias-border-l2: #ffffff1f;
@@ -94,12 +97,31 @@ body {
 }
 
 .brand {
-  display: block;
+  display: flex;
   flex: none;
-  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   height: 40px;
   user-select: none;
+}
+
+.brand-logo {
+  display: block;
+  width: 40px;
+  height: 39px;
+  object-fit: contain;
   -webkit-user-drag: none;
+}
+
+.brand-name {
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--dsw-font-family-brand);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 40px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
 .tagline {
@@ -119,7 +141,7 @@ body {
 }
 
 .tagline em {
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-brand-primary);
   font-family: var(--dsw-font-family-brand);
   font-size: 26px;
   font-style: normal;
@@ -176,7 +198,7 @@ body {
 
 .primary {
   background: var(--dsw-alias-brand-primary);
-  color: var(--dsw-alias-label-primary-inverted);
+  color: var(--dsw-alias-button-primary-label);
 }
 
 .primary:hover:not(:disabled) {
@@ -341,3 +363,72 @@ body {
 .actions .welcome-loading { color: inherit; }
 
 .auth-waiting .copy-link:disabled { cursor: default; }
+
+.settings-form {
+  gap: 32px;
+}
+
+.settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  width: 100%;
+}
+
+.field-label {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.field-label .required {
+  margin-left: 4px;
+  color: var(--dsw-alias-brand-primary);
+}
+
+.key-field input[aria-invalid='true'] {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.key-field .key-error {
+  color: var(--dsw-alias-brand-primary);
+}
+
+.settings-button {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  app-region: no-drag;
+  transition:
+    background-color var(--ds-transition-duration) var(--ds-ease-in-out),
+    color var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.settings-button:hover {
+  background: var(--dsw-alias-button-floating-hover);
+  color: var(--dsw-alias-brand-primary);
+}
+
+.settings-button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-button {
+    transition: none;
+  }
+}

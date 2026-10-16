@@ -53,6 +53,7 @@ import { desktopClientMetadata, desktopClientVersion } from './client-metadata.t
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
 import { readDesktopSettings } from './settings.ts'
+import { readSystemConnection, writeSystemConnection } from './system-connection.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -1178,6 +1179,16 @@ async function main(): Promise<void> {
           if (!saved.ok) return saved
           await enterWorkspace()
           return { ok: true }
+        },
+        readSystemConnection: () => readSystemConnection(app.getPath('userData')),
+        saveSystemConnection: async (connection) => {
+          try {
+            await writeSystemConnection(app.getPath('userData'), connection)
+            return { ok: true }
+          } catch (error) {
+            console.warn('desktop welcome: could not save the system connection', error)
+            return { ok: false, reason: 'write-failed' }
+          }
         },
         skip: enterWorkspace,
       })

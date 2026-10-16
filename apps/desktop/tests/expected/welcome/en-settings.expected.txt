@@ -1,0 +1,8 @@
+KaifangHarness
+KaifangHarness
+System settings
+Configure the system address and authorization code
+System URL*: http://127.0.0.1:9999
+Authorization code*: Enter authorization code [password]
+Save
+Back
