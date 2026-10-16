@@ -22,7 +22,7 @@ export type AccountMenuProps = PropsRuntime<'settings.launcher'> & PropsLocale<'
 export function AccountMenu({
   subscribeSessionExpired, subscribeModelSignInRequired, wide, settingsShortcut, openSettings, openOnboarding, settingsOpen,
   useAccount, useTheme, signOut, hasRunningAccountTasks, refreshAccount, bonusNoticeShown, bonusNoticeDismissed,
-  contactUs, showLogin, start, cancel, avatarFailed, kaifangSignIn, kaifangSignOut, t,
+  contactUs, showLogin, start, cancel, avatarFailed, kaifangSignOut, t,
 }: AccountMenuProps) {
   const anchor = useRef<HTMLDivElement>(null)
   // The launcher outlives the panel, so a false-to-true edge is one Settings entry:
@@ -54,12 +54,7 @@ export function AccountMenu({
     finally { setBusy(false) }
   }
   // The plugin's start publishes `loginFailed` before it rejects, so the dialog owns the report.
-  // The Desktop signs in through the KaifangLab authorization page, as its welcome window does.
-  const beginSignIn = (): void => {
-    setOpen(false)
-    if (kaifangSignIn !== undefined) void kaifangSignIn().catch((error: unknown) => { console.error('[kaifang-account] sign-in failed', error) })
-    else void start().catch(() => undefined)
-  }
+  const beginSignIn = (): void => { setOpen(false); void start().catch(() => undefined) }
   const [kaifangAvatarFailed, setKaifangAvatarFailed] = useState<string | null>(null)
   const signOutKaifang = async () => {
     setBusy(true)

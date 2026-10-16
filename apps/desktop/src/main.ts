@@ -635,7 +635,7 @@ async function main(): Promise<void> {
     },
     callbackPage: outcome => kaifangCallbackPage(locale, outcome),
   })
-  /** Open the KaifangLab authorization page for the welcome window or the workspace account launcher. */
+  /** Open the KaifangLab authorization page for the welcome window or the workspace account settings. */
   const startKaifangBrowserSignIn = async () => kaifangBrowser.start((await readSystemConnection(app.getPath('userData'))).webUrl)
   const readWelcomeState = async () => {
     if (backend.host === undefined || welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')

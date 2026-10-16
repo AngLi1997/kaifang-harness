@@ -535,7 +535,7 @@ describe('desktop main startup', () => {
     expect(harness.windows).toHaveLength(1)
   })
 
-  it('opens the KaifangLab authorization page when the workspace account launcher signs in', async () => {
+  it('opens the KaifangLab authorization page when the workspace account settings sign in', async () => {
     await readyForUpdate()
     await invoke(DESKTOP_IPC.kaifangSignIn, 'app')
     await vi.waitFor(() => { expect(harness.openExternal).toHaveBeenCalledOnce() })
