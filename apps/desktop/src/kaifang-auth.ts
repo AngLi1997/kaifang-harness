@@ -18,7 +18,7 @@ export type KaifangSend = (input: string, init?: RequestInit) => Promise<Respons
 /** Account identity shown in the workspace. */
 export interface KaifangUser {
   readonly username: string
-  /** The account alias when set, otherwise the username. */
+  /** The KaifangLab nickname when set, otherwise the username (account). */
   readonly displayName: string
   readonly email: string | null
   /** Absolute picture URL resolved against the KaifangLab Web URL, or null when the profile has none. */
@@ -126,7 +126,7 @@ export async function establishKaifangSession(
   const result = await call(send, endpoint(connection.systemUrl, KAIFANG_USERINFO_PATH),
     { method: 'GET', headers: { token, accept: 'application/json' } }, timeoutMs)
   if (!result.ok) return result
-  const { username, alias, email, avatar } = result.data
+  const { username, nickname, email, avatar } = result.data
   if (typeof username !== 'string' || username === '') return { ok: false, reason: 'failed' }
   let avatarUrl: string | null = null
   if (typeof avatar === 'string' && avatar !== '') {
@@ -141,7 +141,7 @@ export async function establishKaifangSession(
       expiresAt: jwtExpiry(token),
       user: {
         username,
-        displayName: typeof alias === 'string' && alias.trim() !== '' ? alias.trim() : username,
+        displayName: typeof nickname === 'string' && nickname.trim() !== '' ? nickname.trim() : username,
         email: typeof email === 'string' && email !== '' ? email : null,
         avatarUrl,
       },

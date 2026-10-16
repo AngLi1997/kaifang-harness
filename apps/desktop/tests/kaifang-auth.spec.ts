@@ -47,13 +47,13 @@ describe('KaifangLab session establishment', () => {
   it('reads the profile with the token and resolves a relative picture against the Web URL', async () => {
     const token = jwt({ user_id: 1, exp: 1_900_000_000 })
     const send = vi.fn(async (_input: string, _init?: RequestInit) => Response.json({
-      code: 200, data: { username: 'admin', alias: ' 管理员 ', email: 'admin@example.test', avatar: '/favicon.png' },
+      code: 200, data: { username: 'admin', nickname: ' 超级管理员 ', email: 'admin@example.test', avatar: '/favicon.png' },
     }))
     expect(await establishKaifangSession(connection, token, send, 5_000)).toEqual({
       ok: true,
       session: {
         systemUrl: connection.systemUrl, accessToken: token, expiresAt: 1_900_000_000_000,
-        user: { username: 'admin', displayName: '管理员', email: 'admin@example.test', avatarUrl: 'http://localhost:5173/favicon.png' },
+        user: { username: 'admin', displayName: '超级管理员', email: 'admin@example.test', avatarUrl: 'http://localhost:5173/favicon.png' },
       },
     })
     const [url, init] = send.mock.calls[0]!
@@ -61,8 +61,8 @@ describe('KaifangLab session establishment', () => {
     expect(init).toMatchObject({ method: 'GET', headers: { token } })
   })
 
-  it('falls back to the username without an alias and drops a non-http picture', async () => {
-    const send = async () => Response.json({ code: 200, data: { username: 'u', alias: null, email: '', avatar: 'javascript:alert(1)' } })
+  it('falls back to the username without a nickname and drops a non-http picture', async () => {
+    const send = async () => Response.json({ code: 200, data: { username: 'u', nickname: null, email: '', avatar: 'javascript:alert(1)' } })
     expect(await establishKaifangSession(connection, 'opaque', send, 5_000)).toMatchObject({
       ok: true, session: { expiresAt: null, user: { username: 'u', displayName: 'u', email: null, avatarUrl: null } },
     })
