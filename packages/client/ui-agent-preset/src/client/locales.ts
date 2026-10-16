@@ -21,6 +21,8 @@ export type AgentPresetSettingsKey =
   | 'presetMinimalDescription'
   | 'presetCordisName'
   | 'presetCordisDescription'
+  | 'presetArchiveName'
+  | 'presetArchiveDescription'
   | 'inUse'
   | 'noDescription'
   | 'brokenBadge'
@@ -59,6 +61,9 @@ export const en: Record<AgentPresetSettingsKey, string> = {
   presetCordisName: 'Creator mode',
   presetCordisDescription:
     'Customize DSH through conversation. Let the agent write plugins that add features or UI, or combine tools and prompts to create your own mode.',
+  presetArchiveName: 'Archives mode',
+  presetArchiveDescription:
+    'Work as an archival research officer and archival data governance expert, with the same search, editing, terminal, and other tools as Standard mode.',
 
   inUse: 'New task default',
 
@@ -100,6 +105,8 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
   presetMinimalDescription: 'Agent 使用终端和图片读取工具，并支持上下文压缩，适合测试和对比其基础表现。',
   presetCordisName: '创造模式',
   presetCordisDescription: '用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。',
+  presetArchiveName: '档案模式',
+  presetArchiveDescription: '以档案研究专员与档案数据治理专家的身份工作，可使用与标准模式相同的检索、编辑和终端等工具。',
 
   inUse: '新任务默认',
 
