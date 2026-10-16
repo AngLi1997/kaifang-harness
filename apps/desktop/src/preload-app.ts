@@ -17,6 +17,7 @@ function createProductApi(): DshDesktopProductApi {
     deviceInfo: () => ipcRenderer.invoke(DESKTOP_IPC.deviceInfo) as Promise<string>,
     kaifang: {
       current: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangAccount) as Promise<KaifangAccountView | null>,
+      signIn: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangSignIn) as Promise<void>,
       signOut: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangSignOut) as Promise<void>,
       subscribe(listener) {
         const handle = (_event: Electron.IpcRendererEvent, account: KaifangAccountView | null): void => { listener(account) }

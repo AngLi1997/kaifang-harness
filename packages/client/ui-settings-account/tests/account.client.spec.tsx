@@ -731,6 +731,20 @@ it.each(['desktopOnboardingVisible', 'onboarding'] as const)('defers bonus displ
   expect(screen.getByText(notice.message)).toBeTruthy()
 })
 
+it.each([en, zh])('signs in through the Desktop KaifangLab authorization page after a KaifangLab sign-out', async (copy) => {
+  const base = operationsOf({ status: 'signed-out', attempt: null })
+  const kaifangSignIn = vi.fn(() => Promise.resolve())
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  render(<AccountMenu {...({} as GlobalStandardProps)} {...base} kaifangSignIn={kaifangSignIn} kaifangSignOut={() => Promise.resolve()}
+    settingsOpen={false} useAccount={selector => selector(base.hooks.account.getSnapshot())}
+    useTheme={selector => selector(base.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    t={key => key in copy ? copy[key as AccountKey] : key} />)
+  fireEvent.click(screen.getByRole('button', { name: copy.menu }))
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: copy.signIn })) })
+  expect(kaifangSignIn).toHaveBeenCalledOnce()
+  expect(base.start).not.toHaveBeenCalled()
+})
+
 it.each([en, zh])('shows the Desktop KaifangLab account in the launcher and signs it out', async (copy) => {
   const base = operationsOf({ status: 'signed-out', attempt: null })
   const kaifangSignOut = vi.fn(() => Promise.resolve())

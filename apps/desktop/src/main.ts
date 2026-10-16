@@ -635,6 +635,8 @@ async function main(): Promise<void> {
     },
     callbackPage: outcome => kaifangCallbackPage(locale, outcome),
   })
+  /** Open the KaifangLab authorization page for the welcome window or the workspace account launcher. */
+  const startKaifangBrowserSignIn = async () => kaifangBrowser.start((await readSystemConnection(app.getPath('userData'))).webUrl)
   const readWelcomeState = async () => {
     if (backend.host === undefined || welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
     const state = await welcomeBackend.read()
@@ -856,6 +858,10 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.kaifangAccount, async (event) => {
     assertProductSender(event)
     return (await readKaifangUser()) ?? null
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangSignIn, async (event) => {
+    assertProductSender(event)
+    await startKaifangBrowserSignIn()
   })
   ipcMain.handle(DESKTOP_IPC.kaifangSignOut, async (event) => {
     assertProductSender(event)
@@ -1245,7 +1251,7 @@ async function main(): Promise<void> {
           pendingWelcomeNotice = undefined
           return Promise.resolve(notice)
         },
-        startSignIn: async () => kaifangBrowser.start((await readSystemConnection(app.getPath('userData'))).webUrl),
+        startSignIn: startKaifangBrowserSignIn,
         cancelSignIn: id => Promise.resolve(kaifangBrowser.cancel(id)),
         copySignInLink: async (id) => {
           const url = kaifangBrowser.authorizeUrl(id)

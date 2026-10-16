@@ -88,6 +88,8 @@ export interface AccountSectionInjected {
   hasRunningAccountTasks: () => Promise<boolean>
   /** @returns after local account credentials are removed. */
   signOut: () => Promise<void>
+  /** Desktop-only: open the KaifangLab authorization page; absent when the Desktop bridge does not provide it. */
+  kaifangSignIn?: () => Promise<void>
   /** Desktop-only: remove the KaifangLab session; absent when the Desktop bridge does not provide it. */
   kaifangSignOut?: () => Promise<void>
 }

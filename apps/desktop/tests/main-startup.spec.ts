@@ -216,7 +216,7 @@ const harness = await vi.hoisted(async () => {
     get publishUpdate() { return publishUpdate! },
     set publishUpdate(value: (state: DesktopUpdateState) => DesktopUpdateState) { publishUpdate = value },
     dialog: { showOpenDialog: vi.fn(), showErrorBox: vi.fn(), showMessageBox: vi.fn() },
-    openExternal: vi.fn(async () => {}),
+    openExternal: vi.fn(async (_url: string) => {}),
     protocolHandle: vi.fn<(scheme: string, handler: (request: Request) => Response | Promise<Response>) => void>(),
     applyRelease: vi.fn(() => { preparing.resolve(); return prepared.promise }),
     disableAllPlugins: vi.fn(async () => {
@@ -532,6 +532,16 @@ describe('desktop main startup', () => {
     await vi.waitFor(() => { expect(existsSync(session)).toBe(false) })
     await vi.waitFor(() => { expect(latestItems().some(item => item.label === en.kaifangSignOutMenu)).toBe(false) })
     // The default host still reports an API key, so the workspace stays open without the welcome window.
+    expect(harness.windows).toHaveLength(1)
+  })
+
+  it('opens the KaifangLab authorization page when the workspace account launcher signs in', async () => {
+    await readyForUpdate()
+    await invoke(DESKTOP_IPC.kaifangSignIn, 'app')
+    await vi.waitFor(() => { expect(harness.openExternal).toHaveBeenCalledOnce() })
+    const authorize = new URL(harness.openExternal.mock.calls[0]![0])
+    expect(authorize.pathname).toMatch(/\/authorize$/)
+    expect(new URL(authorize.searchParams.get('redirect_uri')!).pathname).toBe('/kaifang/callback')
     expect(harness.windows).toHaveLength(1)
   })
 

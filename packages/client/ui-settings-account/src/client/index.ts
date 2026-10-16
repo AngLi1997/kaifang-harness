@@ -266,7 +266,7 @@ export function apply(ctx: Context): void {
       if (result.ok) return
       throw result.error
     },
-    ...kaifang === undefined ? {} : { kaifangSignOut: () => kaifang.signOut() },
+    ...kaifang === undefined ? {} : { kaifangSignIn: () => kaifang.signIn(), kaifangSignOut: () => kaifang.signOut() },
   }
   if (desktop) {
     const controller = new DesktopOnboardingController(

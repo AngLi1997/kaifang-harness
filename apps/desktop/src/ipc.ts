@@ -32,6 +32,7 @@ export const DESKTOP_IPC = {
   windowsAppearance: 'dsh-desktop:windows-appearance',
   windowsMenu: 'dsh-desktop:windows-menu',
   kaifangAccount: 'dsh-desktop:kaifang-account',
+  kaifangSignIn: 'dsh-desktop:kaifang-sign-in',
   kaifangSignOut: 'dsh-desktop:kaifang-sign-out',
   kaifangChanged: 'dsh-desktop:kaifang-changed',
 } as const
@@ -94,6 +95,8 @@ export interface DshDesktopProductApi {
   readonly kaifang: {
     /** @returns the signed-in account, or null when no session is stored for the configured system. */
     current(): Promise<KaifangAccountView | null>
+    /** @returns after the system browser opens the KaifangLab authorization page; the callback signs in and publishes the account. */
+    signIn(): Promise<void>
     /** @returns after the session is removed; the welcome window opens when no other sign-in remains. */
     signOut(): Promise<void>
     /** @param listener - receives each sign-in and sign-out. @returns subscription disposer. */
