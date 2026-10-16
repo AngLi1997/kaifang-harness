@@ -63,14 +63,21 @@ export function supportedProtocols(): readonly string[] {
 }
 
 /**
+ * Placeholder key sent for a route naming no credential. pi-ai's protocol
+ * implementations refuse a request with neither a key nor an auth header,
+ * while self-hosted OpenAI- or Anthropic-compatible servers (vLLM, llama.cpp,
+ * Ollama) accept any value, so an unauthenticated route sends this one.
+ */
+const UNAUTHENTICATED_API_KEY = 'unused'
+
+/**
  * Api-key auth for a route the harness authenticates itself. `Models` calls
  * this after the adapter has already resolved the route's credential, so a
  * missing key here is not this layer's failure: a named-but-unresolvable
  * reference has already failed the request with `MISSING_CREDENTIAL`, and a
- * route naming no credential at all is deliberately unauthenticated. Reporting
- * it as configured hands the decision to the protocol, which is where the
- * requirement actually lives — pi-ai's OpenAI-compatible implementation, for
- * one, still insists on a key or an `Authorization` header of its own.
+ * route naming no credential at all is deliberately unauthenticated and sends
+ * {@link UNAUTHENTICATED_API_KEY}. A configured `Authorization` header still
+ * replaces the placeholder's bearer value.
  * @param name - display name used as the resolution's status label.
  * @returns the api-key auth for a harness-authenticated route.
  */
@@ -78,7 +85,7 @@ function harnessApiKeyAuth(name: string): ApiKeyAuth {
   return {
     name,
     resolve: ({ credential }) => Promise.resolve({
-      auth: credential?.key === undefined ? {} : { apiKey: credential.key },
+      auth: { apiKey: credential?.key ?? UNAUTHENTICATED_API_KEY },
       source: name,
     }),
   }
