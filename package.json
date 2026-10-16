@@ -1,6 +1,9 @@
 {
   "name": "@deepseek-ai/dsh-root",
   "version": "0.2.1-alpha.4",
+  "kaifang": {
+    "version": "0.1.1-beta"
+  },
   "license": "MIT",
   "private": true,
   "type": "module",
