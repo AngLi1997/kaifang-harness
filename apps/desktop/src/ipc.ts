@@ -95,7 +95,7 @@ export interface DshDesktopProductApi {
   readonly kaifang: {
     /** @returns the signed-in account, or null when no session is stored for the configured system. */
     current(): Promise<KaifangAccountView | null>
-    /** @returns after the system browser opens the KaifangLab authorization page; the callback signs in and publishes the account. */
+    /** @returns after the welcome window shows the KaifangLab browser and password sign-in; a sign-in publishes the account. */
     signIn(): Promise<void>
     /** @returns after the session is removed; the welcome window opens when no other sign-in remains. */
     signOut(): Promise<void>

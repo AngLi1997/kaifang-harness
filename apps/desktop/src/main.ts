@@ -366,6 +366,8 @@ async function main(): Promise<void> {
   let mainWindow: BrowserWindow | undefined
   let welcomeWindow: BrowserWindow | undefined
   let enteredWorkspace = false
+  // The welcome window is open as the KaifangLab sign-in page over a workspace that stays signed in.
+  let workspaceSignIn = false
   // NSIS passes --updated when it launches the application after installation.
   let raiseAfterUpdate = process.platform === 'win32' && process.argv.includes('--updated')
   let shellInstallerOwnsQuit = false
@@ -635,8 +637,6 @@ async function main(): Promise<void> {
     },
     callbackPage: outcome => kaifangCallbackPage(locale, outcome),
   })
-  /** Open the KaifangLab authorization page for the welcome window or the workspace account settings. */
-  const startKaifangBrowserSignIn = async () => kaifangBrowser.start((await readSystemConnection(app.getPath('userData'))).webUrl)
   const readWelcomeState = async () => {
     if (backend.host === undefined || welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
     const state = await welcomeBackend.read()
@@ -861,7 +861,7 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(DESKTOP_IPC.kaifangSignIn, async (event) => {
     assertProductSender(event)
-    await startKaifangBrowserSignIn()
+    await showKaifangSignIn()
   })
   ipcMain.handle(DESKTOP_IPC.kaifangSignOut, async (event) => {
     assertProductSender(event)
@@ -1219,6 +1219,7 @@ async function main(): Promise<void> {
     if (activate) window.show()
     else window.showInactive()
     enteredWorkspace = true
+    workspaceSignIn = false
     if (welcomeWindow !== undefined) {
       welcomeWindow.close()
       window.webContents.send(DESKTOP_IPC.enterWorkspace)
@@ -1251,7 +1252,7 @@ async function main(): Promise<void> {
           pendingWelcomeNotice = undefined
           return Promise.resolve(notice)
         },
-        startSignIn: startKaifangBrowserSignIn,
+        startSignIn: async () => kaifangBrowser.start((await readSystemConnection(app.getPath('userData'))).webUrl),
         cancelSignIn: id => Promise.resolve(kaifangBrowser.cancel(id)),
         copySignInLink: async (id) => {
           const url = kaifangBrowser.authorizeUrl(id)
@@ -1293,6 +1294,13 @@ async function main(): Promise<void> {
       })
       window.once('closed', () => {
         if (welcomeWindow === window) welcomeWindow = undefined
+        if (workspaceSignIn) {
+          // Dismissing a sign-in opened from the workspace returns to the workspace.
+          workspaceSignIn = false
+          enteredWorkspace = true
+          if (!recovery.active && !isQuitting()) mainWindow?.show()
+          return
+        }
         if (enteredWorkspace || recovery.active) return
         // Nothing runs before the workspace opens. macOS keeps the Dock convention and drops the
         // unused main window so the next activation rebuilds the welcome; elsewhere the close quits.
@@ -1303,6 +1311,15 @@ async function main(): Promise<void> {
       else mainWindow?.hide()
     })().finally(() => { openingWelcome = undefined })
     return openingWelcome
+  }
+  /** Show the KaifangLab sign-in page (browser or password sign-in) for a workspace sign-in entry. */
+  const showKaifangSignIn = async (): Promise<void> => {
+    if (quitting) return
+    if (enteredWorkspace) {
+      workspaceSignIn = true
+      enteredWorkspace = false
+    }
+    await showWelcome()
   }
   const signOutKaifang = async (): Promise<void> => {
     if (quitting) return

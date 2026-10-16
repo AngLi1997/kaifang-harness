@@ -236,6 +236,8 @@ export function apply(ctx: Context): void {
       },
     },
     async start() {
+      // Every Desktop sign-in entry opens the KaifangLab sign-in page instead of the DeepSeek Platform authorization.
+      if (kaifang !== undefined) { await kaifang.signIn(); return }
       publish({ ...snapshot, loginVisible: true, loginFailed: false })
       const transport = (globalThis as typeof globalThis & {
         __DSH_TRANSPORT__?: { streamBaseUrl?: string }
@@ -266,7 +268,7 @@ export function apply(ctx: Context): void {
       if (result.ok) return
       throw result.error
     },
-    ...kaifang === undefined ? {} : { kaifangSignIn: () => kaifang.signIn(), kaifangSignOut: () => kaifang.signOut() },
+    ...kaifang === undefined ? {} : { kaifangSignOut: () => kaifang.signOut() },
   }
   if (desktop) {
     const controller = new DesktopOnboardingController(

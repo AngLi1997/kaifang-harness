@@ -122,18 +122,6 @@ it('starts sign-in and disables cancellation during persistence', async () => {
   expect(screen.queryByRole('button', { name: en.signIn })).toBeNull()
 })
 
-it.each([en, zh])('signs in through the Desktop KaifangLab authorization page from the settings section', async (copy) => {
-  const operations = operationsOf({ status: 'signed-out', attempt: null })
-  const kaifangSignIn = vi.fn(() => Promise.resolve())
-  render(<AccountSection {...({} as GlobalStandardProps)} {...operations} kaifangSignIn={kaifangSignIn}
-    useAccount={selector => selector(operations.hooks.account.getSnapshot())}
-    useTheme={selector => selector(operations.hooks.theme.getSnapshot())}
-    close={() => {}} t={key => key in copy ? copy[key as AccountKey] : key} />)
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: copy.signIn })) })
-  expect(kaifangSignIn).toHaveBeenCalledOnce()
-  expect(operations.start).not.toHaveBeenCalled()
-})
-
 it.each([en, zh].flatMap(copy => ([false, true, 'unknown'] as const).map(running => ({ copy, running }))))('confirms sidebar sign-out with task impact $running', async ({ copy, running }) => {
   const signOut = vi.fn(() => Promise.resolve())
   const openSettings = vi.fn()

@@ -773,3 +773,16 @@ it('applies API-key defaults through the desktop slot and shared configuration o
   expect(values['ui-settings']).toEqual({ enabled: true })
   expect(values['ui-chat']).toMatchObject({ transcriptView: 'standard' })
 }, 60_000)
+
+it('routes every Desktop sign-in entry to the KaifangLab sign-in page instead of the DeepSeek Platform', async ({ start }) => {
+  const signIn = vi.fn(() => Promise.resolve())
+  vi.stubGlobal('dshDesktop', {
+    kaifang: { current: vi.fn(() => Promise.resolve(null)), signIn, signOut: vi.fn(), subscribe: vi.fn(() => () => {}) },
+  })
+  const c = await start()
+  const actions = operations(c)
+  await actions.start()
+  expect(signIn).toHaveBeenCalledOnce()
+  expect(c.mock.remote.account.startSignIn).not.toHaveBeenCalled()
+  expect(actions.hooks.account.getSnapshot().loginVisible).toBe(false)
+}, 60_000)

@@ -13,7 +13,7 @@ export interface KaifangAccount {
 export interface KaifangBridge {
   /** @returns the signed-in account, or null when no session is stored. */
   current(): Promise<KaifangAccount | null>
-  /** @returns after the system browser opens the KaifangLab authorization page; {@link KaifangBridge.subscribe} delivers the account. */
+  /** @returns after the Desktop shows its KaifangLab sign-in page; {@link KaifangBridge.subscribe} delivers the account. */
   signIn(): Promise<void>
   /** @returns after the Desktop removes the session and returns to its welcome window when nothing else signs in. */
   signOut(): Promise<void>
