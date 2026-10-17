@@ -31,7 +31,7 @@ import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
 import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
-import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
+import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale, type DesktopLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
 import { desktopUpdateChannel } from './update-channel.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
@@ -53,6 +53,13 @@ import { desktopClientMetadata, desktopClientVersion } from './client-metadata.t
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
 import { readDesktopSettings } from './settings.ts'
+import { readSystemConnection, writeSystemConnection } from './system-connection.ts'
+import { resolveDurationMs } from './duration-env.ts'
+import {
+  clearKaifangSession, establishKaifangSession, readKaifangSession, requestKaifangToken, writeKaifangSession,
+  type KaifangFailure, type KaifangSession, type KaifangUser,
+} from './kaifang-auth.ts'
+import { KaifangBrowserSignIn } from './kaifang-browser-sign-in.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -205,6 +212,20 @@ function platformLoginUrl(authorizeUrl: string): string {
   return url.href
 }
 
+/**
+ * Page the system browser shows after KaifangLab redirects back to the loopback callback.
+ * @param locale - shell-owned localized copy.
+ * @param outcome - callback result.
+ * @returns a self-contained HTML document.
+ */
+function kaifangCallbackPage(locale: DesktopLocale, outcome: 'succeeded' | 'cancelled' | 'failed'): string {
+  const m = locale.messages
+  const message = outcome === 'succeeded' ? m.kaifangCallbackSucceeded : outcome === 'cancelled' ? m.kaifangCallbackCancelled : m.kaifangCallbackFailed
+  return `<!doctype html><html lang="${locale.id}"><meta charset="utf-8"><meta name="viewport" content="width=device-width">`
+    + `<title>${m.welcomeTitle}</title><body style="font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;color:#282525">`
+    + `<p>${message}</p></body></html>`
+}
+
 function createWindow(preload: string, show = false, primary = false): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -345,6 +366,8 @@ async function main(): Promise<void> {
   let mainWindow: BrowserWindow | undefined
   let welcomeWindow: BrowserWindow | undefined
   let enteredWorkspace = false
+  // The welcome window is open as the KaifangLab sign-in page over a workspace that stays signed in.
+  let workspaceSignIn = false
   // NSIS passes --updated when it launches the application after installation.
   let raiseAfterUpdate = process.platform === 'win32' && process.argv.includes('--updated')
   let shellInstallerOwnsQuit = false
@@ -462,7 +485,7 @@ async function main(): Promise<void> {
         const accountBackend = welcomeBackend.account
         stopAccount = accountBackend.watch((state) => {
           if (quitting) return
-          if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, state)
+          // The welcome window renders KaifangLab browser attempts; DeepSeek attempts start only from the workspace.
           const attempt = state.attempt
           if (attempt?.phase === 'waiting-browser' && attempt.authorizeUrl !== undefined && openedAttempt !== attempt.id) {
             openedAttempt = attempt.id
@@ -561,9 +584,95 @@ async function main(): Promise<void> {
     return state
   }
 
+  // Drives the KaifangLab sign-out entries and the workspace account launcher; the session file stays the authority
+  // for the welcome decision.
+  let kaifangUser: KaifangUser | undefined
+  const readKaifangUser = async (): Promise<KaifangUser | undefined> => {
+    try {
+      const userData = app.getPath('userData')
+      const { systemUrl } = await readSystemConnection(userData)
+      return (await readKaifangSession(userData, systemUrl, Date.now()))?.user
+    } catch (error) {
+      // An unreadable settings or session file requires a fresh sign-in instead of blocking startup.
+      console.warn('desktop welcome: could not read the KaifangLab session', error)
+      return undefined
+    }
+  }
+  const readKaifangSignedIn = async (): Promise<boolean> => await readKaifangUser() !== undefined
+  const publishKaifangUser = (user: KaifangUser | undefined): void => {
+    kaifangUser = user
+    refreshApplicationMenu()
+    if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.webContents.send(DESKTOP_IPC.kaifangChanged, user ?? null)
+  }
+  const kaifangTimeoutMs = (): number => resolveDurationMs(process.env, 'DSH_DESKTOP_KAIFANG_SIGN_IN_TIMEOUT_MS', 15_000)
+  /** Verify a token, store the session, and open the workspace. */
+  const commitKaifangToken = async (token: string): Promise<{ ok: true } | KaifangFailure> => {
+    const userData = app.getPath('userData')
+    let established: { ok: true; session: KaifangSession } | KaifangFailure
+    try {
+      const connection = await readSystemConnection(userData)
+      established = await establishKaifangSession(connection, token, (input, init) => net.fetch(input, init), kaifangTimeoutMs())
+    } catch (error) {
+      console.warn('desktop welcome: could not read the system connection', error)
+      return { ok: false, reason: 'failed' }
+    }
+    if (!established.ok) return established
+    try { await writeKaifangSession(userData, established.session) } catch (error) {
+      console.warn('desktop welcome: could not save the KaifangLab session', error)
+      return { ok: false, reason: 'failed' }
+    }
+    publishKaifangUser(established.session.user)
+    await enterWorkspace()
+    return { ok: true }
+  }
+  /** Re-read the stored session's profile so KaifangLab nickname, email, and picture edits reach the workspace. */
+  const refreshKaifangUser = async (): Promise<void> => {
+    const userData = app.getPath('userData')
+    let session: KaifangSession | undefined
+    let established: { ok: true; session: KaifangSession } | KaifangFailure
+    try {
+      const connection = await readSystemConnection(userData)
+      session = await readKaifangSession(userData, connection.systemUrl, Date.now())
+      if (session === undefined) return
+      established = await establishKaifangSession(connection, session.accessToken,
+        (input, init) => net.fetch(input, init), kaifangTimeoutMs())
+    } catch (error) {
+      console.warn('desktop kaifang: could not refresh the account', error)
+      return
+    }
+    // A failed read keeps the stored account; sign-out stays an explicit user action.
+    if (!established.ok) return
+    const user = established.session.user
+    if (kaifangUser !== undefined && kaifangUser.username === user.username && kaifangUser.displayName === user.displayName
+      && kaifangUser.email === user.email && kaifangUser.avatarUrl === user.avatarUrl) return
+    try {
+      const latest = await readKaifangSession(userData, session.systemUrl, Date.now())
+      // A sign-out or another sign-in during the request owns the session file.
+      if (latest?.accessToken !== session.accessToken) return
+      await writeKaifangSession(userData, established.session)
+    } catch (error) {
+      console.warn('desktop kaifang: could not save the refreshed account', error)
+      return
+    }
+    publishKaifangUser(user)
+  }
+  const kaifangBrowser = new KaifangBrowserSignIn({
+    ttlMs: resolveDurationMs(process.env, 'DSH_DESKTOP_KAIFANG_BROWSER_SIGN_IN_TTL_MS', 600_000),
+    publish: (view) => {
+      if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.webContents.send(WELCOME_IPC.state, view)
+    },
+    openBrowser: (url) => { void shell.openExternal(url).catch((error: unknown) => { console.warn('desktop kaifang: could not open the browser', error) }) },
+    complete: async (token) => {
+      const result = await commitKaifangToken(token)
+      return result.ok ? 'succeeded' : result.reason === 'invalid-credentials' ? 'rejected' : 'failed'
+    },
+    callbackPage: outcome => kaifangCallbackPage(locale, outcome),
+  })
   const readWelcomeState = async () => {
     if (backend.host === undefined || welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
-    return welcomeBackend.read()
+    const state = await welcomeBackend.read()
+    // The session file is read only when no other route already skips the welcome entry.
+    return { ...state, kaifangSignedIn: !state.loggedIn && !state.hasApiKey && await readKaifangSignedIn() }
   }
   stopForRecovery = () => backend.close()
 
@@ -777,6 +886,22 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return readDeviceInfo()
   })
+  ipcMain.handle(DESKTOP_IPC.kaifangAccount, async (event) => {
+    assertProductSender(event)
+    return (await readKaifangUser()) ?? null
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangSignIn, async (event) => {
+    assertProductSender(event)
+    await showKaifangSignIn()
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangSignOut, async (event) => {
+    assertProductSender(event)
+    await signOutKaifang()
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangRefresh, async (event) => {
+    assertProductSender(event)
+    await refreshKaifangUser()
+  })
   ipcMain.handle(DESKTOP_IPC.onboardingApiKey, async (event) => {
     assertProductSender(event)
     return (await readWelcomeState()).hasApiKey
@@ -959,6 +1084,8 @@ async function main(): Promise<void> {
         click: () => { void showAbout().catch((error: unknown) => { console.error(error) }) } }
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
+    ...kaifangUser !== undefined ? [{ label: currentDesktopLocale().messages.kaifangSignOutMenu, click: requestKaifangSignOut },
+      { type: 'separator' as const }] : [],
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
     ...process.platform === 'darwin' || process.platform === 'win32'
       ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
@@ -988,12 +1115,14 @@ async function main(): Promise<void> {
     tray?.relabel()
   }
   refreshApplicationMenu()
+  void readKaifangUser().then((user) => { if (kaifangUser === undefined && user !== undefined) publishKaifangUser(user) })
   const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
   if (process.platform === 'win32') {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
-        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
+        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() },
+        signOut: () => kaifangUser !== undefined ? requestKaifangSignOut : undefined })
     } catch (error) { console.warn('desktop tray: unavailable', error) }
   }
   const backgroundNotice = process.platform === 'win32'
@@ -1125,6 +1254,7 @@ async function main(): Promise<void> {
     if (activate) window.show()
     else window.showInactive()
     enteredWorkspace = true
+    workspaceSignIn = false
     if (welcomeWindow !== undefined) {
       welcomeWindow.close()
       window.webContents.send(DESKTOP_IPC.enterWorkspace)
@@ -1157,20 +1287,12 @@ async function main(): Promise<void> {
           pendingWelcomeNotice = undefined
           return Promise.resolve(notice)
         },
-        startSignIn: async () => {
-          if (welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
-          return welcomeBackend.account.start(desktopClientMetadata(locale.id))
-        },
-        cancelSignIn: async (id) => {
-          if (welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
-          return welcomeBackend.account.cancel(id)
-        },
+        startSignIn: async () => kaifangBrowser.start((await readSystemConnection(app.getPath('userData'))).webUrl),
+        cancelSignIn: id => Promise.resolve(kaifangBrowser.cancel(id)),
         copySignInLink: async (id) => {
-          const state = await welcomeBackend?.account.state()
-          if (state?.attempt?.id !== id || state.attempt.phase !== 'waiting-browser' || state.attempt.authorizeUrl === undefined) {
-            throw new Error('desktop welcome: login link is unavailable')
-          }
-          await clipboard.writeText(platformLoginUrl(state.attempt.authorizeUrl))
+          const url = kaifangBrowser.authorizeUrl(id)
+          if (url === undefined) throw new Error('desktop welcome: login link is unavailable')
+          await clipboard.writeText(url)
         },
         saveApiKey: async (apiKey) => {
           if (backend.host === undefined || welcomeBackend === undefined) return { ok: false }
@@ -1179,17 +1301,41 @@ async function main(): Promise<void> {
           await enterWorkspace()
           return { ok: true }
         },
+        readSystemConnection: () => readSystemConnection(app.getPath('userData')),
+        saveSystemConnection: async (connection) => {
+          try {
+            await writeSystemConnection(app.getPath('userData'), connection)
+            return { ok: true }
+          } catch (error) {
+            console.warn('desktop welcome: could not save the system connection', error)
+            return { ok: false, reason: 'write-failed' }
+          }
+        },
+        passwordSignIn: async (credentials) => {
+          let systemUrl: string
+          try { ({ systemUrl } = await readSystemConnection(app.getPath('userData'))) } catch (error) {
+            console.warn('desktop welcome: could not read the system connection', error)
+            return { ok: false, reason: 'failed' }
+          }
+          const token = await requestKaifangToken(systemUrl, credentials, (input, init) => net.fetch(input, init), kaifangTimeoutMs())
+          return token.ok ? commitKaifangToken(token.token) : token
+        },
         skip: enterWorkspace,
       })
       const window = welcomeWindow
       window.once('closed', () => {
-        void welcomeBackend?.account.state().then((state) => {
-          if (state.attempt !== null && !enteredWorkspace) return welcomeBackend?.account.cancel(state.attempt.id)
-          return undefined
-        }).catch(() => undefined)
+        const attempt = kaifangBrowser.view().attempt
+        if (attempt !== null && !enteredWorkspace) kaifangBrowser.cancel(attempt.id)
       })
       window.once('closed', () => {
         if (welcomeWindow === window) welcomeWindow = undefined
+        if (workspaceSignIn) {
+          // Dismissing a sign-in opened from the workspace returns to the workspace.
+          workspaceSignIn = false
+          enteredWorkspace = true
+          if (!recovery.active && !isQuitting()) mainWindow?.show()
+          return
+        }
         if (enteredWorkspace || recovery.active) return
         // Nothing runs before the workspace opens. macOS keeps the Dock convention and drops the
         // unused main window so the next activation rebuilds the welcome; elsewhere the close quits.
@@ -1201,6 +1347,32 @@ async function main(): Promise<void> {
     })().finally(() => { openingWelcome = undefined })
     return openingWelcome
   }
+  /** Show the KaifangLab sign-in page (browser or password sign-in) for a workspace sign-in entry. */
+  const showKaifangSignIn = async (): Promise<void> => {
+    if (quitting) return
+    if (enteredWorkspace) {
+      workspaceSignIn = true
+      enteredWorkspace = false
+    }
+    await showWelcome()
+  }
+  const signOutKaifang = async (): Promise<void> => {
+    if (quitting) return
+    try {
+      await clearKaifangSession(app.getPath('userData'))
+    } catch (error) {
+      console.error('desktop: could not remove the KaifangLab session', error)
+      await ordinaryMessageBox({ type: 'error', title: locale.messages.kaifangSignOutMenu, message: locale.messages.kaifangSignOutFailed,
+        buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
+      return
+    }
+    publishKaifangUser(undefined)
+    // A DeepSeek account or API key still authenticates the workspace, which then stays open.
+    if (!needsWelcome(await readWelcomeState()) || isQuitting()) return
+    enteredWorkspace = false
+    await showWelcome()
+  }
+  const requestKaifangSignOut = (): void => { void signOutKaifang().catch((error: unknown) => { console.error(error) }) }
   const openInitialWindow = async (): Promise<void> => {
     if (quitting || recovery.active) return
     const state = await readWelcomeState()
@@ -1208,7 +1380,7 @@ async function main(): Promise<void> {
     locale = resolveDesktopStartupLocale(state.localePreference, systemLanguages)
     windowsLanguage = locale.id
     refreshApplicationMenu()
-    if (!enteredWorkspace && needsWelcome({ loggedIn: state.loggedIn, hasApiKey: state.hasApiKey })) {
+    if (!enteredWorkspace && needsWelcome(state)) {
       // A later login must retain its own activation policy instead of replaying startup focus.
       raiseAfterUpdate = false
       await showWelcome()
@@ -1253,6 +1425,7 @@ async function main(): Promise<void> {
     backgroundNotice?.dispose()
     tray?.dispose()
     stopAccount?.()
+    kaifangBrowser.dispose()
     if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.hide()
     if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.hide()
     updateSchedule.dispose()

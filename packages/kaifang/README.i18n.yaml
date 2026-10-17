@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/kaifang/README.md
+/:
+  en: 3472dffdd26f6508
+  zh: 411d78dfc2d3e93a
+/kaifang-kaifang-built-in-plugins:
+  en: 505497bc1badac9a
+  zh: ee268147fb8ecf85
+/kaifang-kaifang-built-in-plugins/summary:
+  en: 77b4ec2f6355ce37
+  zh: 21c7f555a99ec665
+/kaifang-kaifang-built-in-plugins/table-of-contents:
+  en: 675c612c40be6adc
+  zh: 54adc76b1678aeef
+/kaifang-kaifang-built-in-plugins/packages:
+  en: a24c96130fd1eb3d
+  zh: 9ae1434bb83f9ed4
+/kaifang-kaifang-built-in-plugins/add-a-package:
+  en: 124271c1000c5faa
+  zh: 05b7390399cb3f68
+/kaifang-kaifang-built-in-plugins/related-documentation:
+  en: 6dbb1022a8e4e2e1
+  zh: d73f57f6ce10fb8d
+/kaifang-kaifang-built-in-plugins/dev-note:
+  en: 5de1d6304e00c58f
+  zh: e58fc8dda0bea8d5

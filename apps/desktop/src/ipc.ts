@@ -31,7 +31,20 @@ export const DESKTOP_IPC = {
   windowFullscreen: 'dsh-desktop:window-fullscreen',
   windowsAppearance: 'dsh-desktop:windows-appearance',
   windowsMenu: 'dsh-desktop:windows-menu',
+  kaifangAccount: 'dsh-desktop:kaifang-account',
+  kaifangSignIn: 'dsh-desktop:kaifang-sign-in',
+  kaifangSignOut: 'dsh-desktop:kaifang-sign-out',
+  kaifangRefresh: 'dsh-desktop:kaifang-refresh',
+  kaifangChanged: 'dsh-desktop:kaifang-changed',
 } as const
+
+/** Signed-in KaifangLab identity shown by the workspace account launcher; carries no token. */
+export interface KaifangAccountView {
+  readonly username: string
+  readonly displayName: string
+  readonly email: string | null
+  readonly avatarUrl: string | null
+}
 
 /** Desktop release update state rendered by desktop-owned UI. */
 export type DesktopUpdatePreparationFailureKind = 'stop-failed' | 'tasks-changed' | 'tasks-unavailable'
@@ -79,6 +92,22 @@ export interface DshDesktopProductApi {
    * @returns `name=value` fields separated by `; `, with no hostname, user name, or serial number.
    */
   deviceInfo(): Promise<string>
+  /** KaifangLab account stored by the welcome window's password or browser sign-in. */
+  readonly kaifang: {
+    /** @returns the signed-in account, or null when no session is stored for the configured system. */
+    current(): Promise<KaifangAccountView | null>
+    /** @returns after the welcome window shows the KaifangLab browser and password sign-in; a sign-in publishes the account. */
+    signIn(): Promise<void>
+    /** @returns after the session is removed; the welcome window opens when no other sign-in remains. */
+    signOut(): Promise<void>
+    /**
+     * Re-read the stored session's profile.
+     * @returns after the read settles; a changed account reaches `subscribe`, and a failed read keeps the stored account.
+     */
+    refresh(): Promise<void>
+    /** @param listener - receives each sign-in and sign-out. @returns subscription disposer. */
+    subscribe(listener: (account: KaifangAccountView | null) => void): () => void
+  }
   readonly updates: {
     status(): Promise<DesktopUpdatePresentation>
     open(): Promise<void>

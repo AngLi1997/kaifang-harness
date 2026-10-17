@@ -35,7 +35,7 @@ Enable the [knowledge bundle](../knowledge-bundle/README.md) in Plugins, then op
 <details>
 <summary>Maintainer details — click to expand</summary>
 
-The plugin mounts the generated `knowledge` Remote contribution and follows the catalog stream once for its lifetime. The page receives the catalog through the injected `knowledgeCatalog` hook and every Host operation as a callback. The `@` source, user-text rule, and keyed `conversation.user.text.node` renderer use the Host's canonical `@[name](dsh-knowledge:id)` mention; the composer chip uses the folder appearance. The sidebar row uses order 20, after Plugins and Automation tasks.
+The plugin mounts the generated `knowledge` Remote contribution and follows the catalog stream once for its lifetime. The page receives the catalog through the injected `knowledgeCatalog` hook and every Host operation as a callback. The `@` source, user-text rule, and keyed `conversation.user.text.node` renderer use the Host's canonical `@[name](dsh-knowledge:id)` mention; the composer chip uses the folder appearance. The sidebar row uses order 2, directly below Archive tools and above Automation tasks.
 
 </details>
 

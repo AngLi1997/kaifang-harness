@@ -18,6 +18,10 @@ overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # One copy of each. A second mdast-util-from-markdown or micromark-util-types
+  # makes their Extension types distinct, so fromMarkdown rejects mixed GFM and math options.
+  mdast-util-from-markdown: 2.1.0
+  micromark-util-types: 2.0.3
 
 peerDependencyRules:
   allowedVersions:

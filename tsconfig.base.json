@@ -71,6 +71,8 @@
       "@deepseek-ai/dsh-experimental-knowledge-bundle": ["./packages/experimental/knowledge-bundle/src/index.ts"],
       "@deepseek-ai/dsh-experimental-client-ui-claude-code-mods": ["./packages/experimental/client-ui-claude-code-mods/src/index.ts"],
       "@deepseek-ai/dsh-experimental-client-ui-claude-code-mods/client": ["./packages/experimental/client-ui-claude-code-mods/src/client/index.ts"],
+      "@deepseek-ai/dsh-kaifang-client-ui-archive-tools": ["./packages/kaifang/client-ui-archive-tools/src/index.ts"],
+      "@deepseek-ai/dsh-kaifang-client-ui-archive-tools/client": ["./packages/kaifang/client-ui-archive-tools/src/client/index.ts"],
 
       "@deepseek-ai/dsh-experimental-claude-code-mods/types": ["./packages/experimental/claude-code-mods/src/types.ts"],
       // The example mods are source-only plugin entries; a source launch resolves the package subpath here.

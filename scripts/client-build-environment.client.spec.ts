@@ -14,6 +14,7 @@ import {
   repositoryClientBuildEnvironment,
   repositoryCommitHash,
   repositoryGitDirty,
+  repositoryProductVersion,
   repositoryVersion,
   resolveClientBuildEnvironment,
   writeClientBuildRecord,
@@ -199,6 +200,25 @@ describe('client build environment', () => {
     expect(repositoryGitDirty(fixtureRoot)).toBe(false)
     write(join(fixtureRoot, 'submodule/tracked.txt'), 'modified submodule\n')
     expect(repositoryGitDirty(fixtureRoot)).toBe(true)
+  })
+
+  it('embeds the declared Kaifang product version beside the repository version', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'dsh-client-build-product-'))
+    roots.push(fixtureRoot)
+    write(join(fixtureRoot, 'package.json'), '{"version":"2.0.0","kaifang":{"version":"0.1.1-beta"}}\n')
+
+    expect(repositoryProductVersion(fixtureRoot)).toBe('0.1.1-beta')
+    expect(repositoryClientBuildEnvironment(fixtureRoot, {
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH,
+      DSH_CLIENT_PRODUCT_VERSION: 'spoofed',
+    })).toEqual({
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_PRODUCT_VERSION: '0.1.1-beta',
+      DSH_CLIENT_VERSION: '2.0.0',
+    })
+
+    write(join(fixtureRoot, 'package.json'), '{"version":"2.0.0","kaifang":{"version":"beta"}}\n')
+    expect(() => repositoryProductVersion(fixtureRoot)).toThrow(/kaifang\.version/)
   })
 
   it('omits dirty metadata when repository metadata is unavailable', () => {

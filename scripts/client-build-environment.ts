@@ -28,6 +28,9 @@ const CLIENT_COMMIT_HASH_VARIABLE = 'DSH_CLIENT_COMMIT_HASH'
 /** Public variable carrying the repository package version embedded in client artifacts. */
 const CLIENT_VERSION_VARIABLE = 'DSH_CLIENT_VERSION'
 
+/** Public variable carrying the Kaifang product version embedded in client artifacts. */
+const CLIENT_PRODUCT_VERSION_VARIABLE = 'DSH_CLIENT_PRODUCT_VERSION'
+
 /** Repository-relative path of the complete client build record. */
 export const CLIENT_BUILD_RECORD_PATH = '.dsh-build/client-build-environment.json'
 
@@ -68,19 +71,45 @@ export function repositoryCommitHash(root: string, environment: NodeJS.ProcessEn
  * @returns the repository's semver-compatible package version.
  */
 export function repositoryVersion(root: string): string {
+  const manifest = repositoryManifest(root)
+  if (!isObject(manifest) || typeof manifest.version !== 'string' || !SEMVER_PATTERN.test(manifest.version)) {
+    throw new Error(`repository package.json has an invalid version ${JSON.stringify(isObject(manifest) ? manifest.version : undefined)}`)
+  }
+  return manifest.version
+}
+
+/**
+ * Resolve the Kaifang product version shown by the client brand.
+ * The product version is independent of the DSH package version that update and compatibility checks use.
+ * @param root - repository root containing the authoritative package.json.
+ * @returns `kaifang.version` from the root manifest, or undefined when the manifest declares none.
+ */
+export function repositoryProductVersion(root: string): string | undefined {
+  const manifest = repositoryManifest(root)
+  const product = isObject(manifest) ? manifest.kaifang : undefined
+  if (product === undefined) return undefined
+  const version = isObject(product) ? product.version : undefined
+  if (typeof version !== 'string' || !SEMVER_PATTERN.test(version)) {
+    throw new Error(`repository package.json has an invalid kaifang.version ${JSON.stringify(version)}`)
+  }
+  return version
+}
+
+const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+
+/**
+ * Read the root manifest.
+ * @param root - repository root containing package.json.
+ * @returns the parsed manifest JSON.
+ */
+function repositoryManifest(root: string): unknown {
   const path = resolve(root, 'package.json')
-  let manifest: unknown
   try {
-    manifest = JSON.parse(readFileSync(path, 'utf8'))
+    return JSON.parse(readFileSync(path, 'utf8'))
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     throw new Error(`cannot read repository version from ${path}: ${detail}`)
   }
-  if (!isObject(manifest) || typeof manifest.version !== 'string'
-    || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) {
-    throw new Error(`repository package.json has an invalid version ${JSON.stringify(isObject(manifest) ? manifest.version : undefined)}`)
-  }
-  return manifest.version
 }
 
 /**
@@ -122,12 +151,14 @@ export function repositoryClientBuildEnvironment(
   const inherited = { ...clientBuildEnvironment(environment) }
   delete inherited.DSH_CLIENT_COMMIT_HASH
   delete inherited.DSH_CLIENT_GIT_DIRTY
+  delete inherited.DSH_CLIENT_PRODUCT_VERSION
   delete inherited.DSH_CLIENT_VERSION
   const dirty = repositoryGitDirty(root)
   return {
     ...inherited,
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     ...(dirty === true ? { DSH_CLIENT_GIT_DIRTY: 'true' } : {}),
+    ...productVersionEnvironment(root),
     DSH_CLIENT_VERSION: repositoryVersion(root),
   }
 }
@@ -144,9 +175,20 @@ export function officialClientBuildEnvironment(
 ): Readonly<Record<`DSH_CLIENT_${string}`, string>> {
   return {
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
+    ...productVersionEnvironment(root),
     DSH_CLIENT_VERSION: repositoryVersion(root),
     ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
   }
+}
+
+/**
+ * Build the optional product-version entry of a repository client environment.
+ * @param root - repository root containing the authoritative package.json.
+ * @returns the `DSH_CLIENT_PRODUCT_VERSION` entry, or no entry without a declared product version.
+ */
+function productVersionEnvironment(root: string): Readonly<Record<string, string>> {
+  const version = repositoryProductVersion(root)
+  return version === undefined ? {} : { [CLIENT_PRODUCT_VERSION_VARIABLE]: version }
 }
 
 /** Digest of every client artifact produced by the complete root build. */
@@ -198,8 +240,10 @@ export function resolveClientBuildEnvironment(
     if (version === undefined) {
       throw new Error(`${CLIENT_VERSION_VARIABLE} is required for the official client build profile`)
     }
+    const productVersion = environment[CLIENT_PRODUCT_VERSION_VARIABLE]
     return {
       DSH_CLIENT_COMMIT_HASH: commitHash,
+      ...(productVersion === undefined ? {} : { [CLIENT_PRODUCT_VERSION_VARIABLE]: productVersion }),
       DSH_CLIENT_VERSION: version,
       ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
     }

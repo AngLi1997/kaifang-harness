@@ -29,6 +29,8 @@ const state = vi.hoisted(() => ({
   moveTopWorkspace: vi.fn(),
   openDevTools: vi.fn(),
   closeWelcome: vi.fn(),
+  hideWorkspace: vi.fn(),
+  welcomeOnce: vi.fn<(name: string, callback: () => void) => void>(),
   welcomeLocale: undefined as DesktopLocale | undefined,
   preference: 'zh',
   hasApiKey: false,
@@ -79,7 +81,7 @@ vi.mock('electron', () => ({
     restore = vi.fn()
     focus = state.focusWorkspace
     moveTop = state.moveTopWorkspace
-    hide = vi.fn()
+    hide = state.hideWorkspace
     show = state.showWorkspace
     showInactive = state.showInactiveWorkspace
     async loadURL(url: string) { state.contents = this.webContents; await state.loadWorkspace(url); this.ready?.() }
@@ -159,7 +161,7 @@ vi.mock('../src/welcome-window.ts', () => ({
     state.welcomeLocale = locale
     state.operations = operations
     await state.beforeWelcome()
-    return { once: vi.fn(), close: state.closeWelcome, isDestroyed: () => false,
+    return { once: state.welcomeOnce, close: state.closeWelcome, isDestroyed: () => false,
       show: vi.fn(), focus: vi.fn(), webContents: { send: vi.fn() } }
   },
 }))
@@ -170,6 +172,40 @@ afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+})
+
+function stubDevelopmentEnvironment(): void {
+  vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
+  vi.stubEnv('DSH_DESKTOP_DEV_PROJECT_DIR', '/development-profile')
+  vi.stubEnv('DSH_DESKTOP_NODE_BINARY', '/runtime/node')
+  vi.stubEnv('DSH_DESKTOP_PNPM_ENTRY', '/runtime/pnpm')
+  vi.stubEnv('DSH_DESKTOP_DSH_DIR', '/runtime/dsh')
+  vi.stubEnv('DSH_DESKTOP_PRIMARY_RUNTIME_DIR', '/runtime/primary-runtime')
+  vi.stubEnv('DSH_DESKTOP_HOST_INSPECT_PORT', undefined)
+  vi.stubEnv('DSH_DESKTOP_OPEN_DEVTOOLS', '0')
+  vi.stubEnv('DSH_DESKTOP_MANDATORY_UPDATE_CONFIG', undefined)
+  vi.stubEnv('DSH_DESKTOP_UPDATE_JOURNAL_DIR', undefined)
+}
+
+it('opens the KaifangLab sign-in page from the workspace and returns to the workspace when it closes', async () => {
+  vi.resetModules()
+  vi.clearAllMocks()
+  state.hasApiKey = true
+  state.operations = undefined
+  stubDevelopmentEnvironment()
+  await import('../src/main.ts')
+  await vi.waitFor(() => { expect(state.showWorkspace).toHaveBeenCalledOnce() })
+  expect(state.beforeWelcome).not.toHaveBeenCalled()
+  const contents = state.contents!
+  await state.handlers.get(DESKTOP_IPC.kaifangSignIn)!({ sender: contents, senderFrame: contents.mainFrame })
+  expect(state.beforeWelcome).toHaveBeenCalledOnce()
+  expect(state.operations).toBeDefined()
+  expect(state.closeWelcome).not.toHaveBeenCalled()
+  expect(state.hideWorkspace).toHaveBeenCalledOnce()
+  for (const [name, callback] of state.welcomeOnce.mock.calls) if (name === 'closed') callback()
+  expect(state.showWorkspace).toHaveBeenCalledTimes(2)
+  expect(state.quit).not.toHaveBeenCalled()
+  state.hasApiKey = false
 })
 
 it.each([false, true])('starts welcome onboarding without carrying update focus into login or skip (Windows update=%s)', async (updated) => {

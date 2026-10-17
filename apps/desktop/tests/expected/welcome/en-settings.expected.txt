@@ -1,0 +1,9 @@
+KaifangHarness
+KaifangHarness
+System settings
+Configure the system address, sign-in page, and authorization code
+System URL*: http://127.0.0.1:9999
+Sign-in page URL*: http://localhost:5173
+Authorization code*: Enter authorization code [password]
+Save
+Back

@@ -21,11 +21,8 @@ import { knowledgeMentionRule } from './user-text-rule.ts'
 /** Main panel id of the knowledge base page. */
 const PANEL_ID = 'knowledge' as MainPanelId
 
-/**
- * Sidebar position: after Plugins (0) and Automation tasks (10). An archive tools
- * entry placed above it takes an order below this value.
- */
-const PANEL_ORDER = 20
+/** Sidebar position: directly below Archive tools (1) and above Automation tasks (10). */
+const PANEL_ORDER = 2
 
 /** Services the browser contributions read. */
 export const inject = [

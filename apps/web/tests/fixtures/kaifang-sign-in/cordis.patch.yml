@@ -1,0 +1,7 @@
+# The KaifangLab sign-in scenario restores the Web bundle's sign-in page over the
+# scaffold's opt-out; initial setup is complete so the workspace opens after sign-in.
+- id: ui-settings-account
+  config:
+    step: done
+    completion: completed
+    kaifangSignIn: true

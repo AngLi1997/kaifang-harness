@@ -1,0 +1,37 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/kaifang/client-ui-archive-tools/README.md
+/:
+  en: f684bf373f4a2c28
+  zh: 0461f5c69108adef
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools:
+  en: 72983b035a8d1000
+  zh: 9454c207e311073f
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/summary:
+  en: 4fc172a048b4c8b7
+  zh: ec3847d9e2f38d9e
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: bda879a892f240f0
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/use-this-package:
+  en: ba860950abb8e1c9
+  zh: adccc99d80f1301e
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/understand-the-implementation:
+  en: a00c38663c21c600
+  zh: 9452f74000291052
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/further-exploration:
+  en: 295305ca5176681d
+  zh: 9169841ef616ff49
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/model-experience:
+  en: 91e97a0c02f3dbf6
+  zh: f22583d87e44eb92
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/model-experience/kv-cache-effect:
+  en: 5d65c2e0579db6a2
+  zh: 475f4f6e1f283e86
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/known-limitations-and-deferred-work:
+  en: a1961cb8a9011ad7
+  zh: 504753d500351ba1
+/deepseek-ai-dsh-kaifang-client-ui-archive-tools/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

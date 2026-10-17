@@ -143,6 +143,9 @@
     # reports an actionable error when its settings-domain provider is absent.
     - id: ui-settings-account
       name: '@deepseek-ai/dsh-client-ui-settings-account'
+      # The Web app opens on the KaifangLab sign-in page until an account signs in.
+      config:
+        kaifangSignIn: true
 
     - id: account-controller
       name: '@deepseek-ai/dsh-api-account-controller'
@@ -398,6 +401,11 @@
     - id: ui-schedule
       name: '@deepseek-ai/dsh-client-ui-schedule'
 
+    # Kaifang archive tool catalog: the sidebar entry, its main-column page,
+    # and the @ picker that references a tool in the conversation.
+    - id: kaifang-archive-tools
+      name: '@deepseek-ai/dsh-kaifang-client-ui-archive-tools'
+
     # Goal surface: GoalBar in the input dock over the goal session projection.
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'
@@ -583,4 +591,4 @@
     - id: agent-preset-registry
       name: '@deepseek-ai/dsh-agent-preset-registry'
       config:
-        default: standard
+        default: archive

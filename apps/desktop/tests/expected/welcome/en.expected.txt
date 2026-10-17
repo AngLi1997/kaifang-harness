@@ -1,6 +1,7 @@
-DeepSeek Harness
-DeepSeek Harness
-Welcome to DeepSeek Harness
-Build potential. Explore intelligence.
+KaifangHarness
+KaifangHarness
+Welcome to KaifangHarness
+Rules as our measure. Building and creating together.
 Sign in
-Add API Key
+Sign in with password
+Settings

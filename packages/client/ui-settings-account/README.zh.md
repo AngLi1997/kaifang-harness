@@ -63,6 +63,15 @@ Desktop preload 标记在账号凭证已存储后启用引导。进度属于本�
 
 欢迎页必须点击“开始设置”。额度页始终展示。首次进入时若已确认有正余额，则主操作为“继续”，次操作为“去充值”。该选择在引导控制器重建前保持固定且不持久化，后到的余额结果不会改变按钮。仅在确认不存在正余额时，继续而不充值才需确认；查询中或失败时不阻止继续。用途卡片选中后描述不变。从原生充值视图返回后保留额度页，并在等待任何已在进行的读取结束后于后台重读资料与余额，不受页面加载或支付结果影响。该读取不会重新计算该选择，因此充值成功后按钮仍保持首次进入时的状态，而继续前行仍按刷新后的余额判断。“下一步”仅在确认零余额时提示；额度页的“跳过”使用充值提示，答题页使用设置提示。仅选办公用途时以简洁展示完成；选择开发或两种用途时还会询问过程详情。上一步保留已有选择，任意可跳过步骤均采用标准工作过程、简洁性能与用量以及关闭代码工作工具的默认值。此流程不创建工作区或示例任务。
 
+<a id="kaifang-sign-in"></a>
+### KaifangLab 登录
+
+所有登录入口（侧栏账号按钮、账号设置和模型引导中的登录）都调用共享的 start 操作；只要存在 KaifangLab 登录界面，就登录 KaifangLab，而不再发起 DeepSeek Platform 授权。桌面端提供 `dshDesktop.kaifang`，其 `signIn()` 显示桌面欢迎窗口；该窗口由 [Desktop README](../../../apps/desktop/README.zh.md) 说明。纯浏览器在 ui-settings-account 选项 `kaifangSignIn` 为 true 时使用 Web 登录页；Web 应用 bundle 启用该选项，schema 默认值为 false。
+
+未登录 KaifangLab 账号时，Web 登录页覆盖工作区。页面提供一键登录、账号密码登录，以及用于配置系统 URL、认证页面 URL 和授权码的设置；浏览器把这些设置和登录会话（含访问令牌）保存在当前源的 localStorage 中。会话随令牌过期，修改系统 URL 会丢弃会话。账号密码登录向系统 URL 提交账号和密码，因此 KaifangLab 服务端必须通过 CORS 允许当前源；`kaifangRequestTimeoutMs` 限制每次请求的时长。一键登录在新标签页打开 `{认证页面 URL}/authorize`，附带随机 state，并回调到 Web 客户端的 `kaifang/callback.html`。KaifangLab 只接受回环 http 源上的该回调，因此仅当 Web 客户端通过 127.0.0.1 或 localhost 打开时一键登录可用。回调页通过 localStorage 交回令牌，工作区标签页只接受当前待处理的 state，回调标签页随后自行关闭。侧栏账号按钮随后显示 KaifangLab 昵称，退出登录后回到登录页。
+
+登录 KaifangLab 账号后，侧栏账号按钮在启动时、窗口获得焦点或变为可见时，以及每隔 `kaifangRefreshIntervalMs`（默认 60 秒）用已保存的令牌重新读取账号资料，因此在 KaifangLab 修改的昵称、邮箱和头像无需重新登录即可显示。重新读取失败时保留已保存的账号。没有头像或头像加载失败时显示 KaifangLab 标志。
+
 <a id="understand-the-implementation"></a>
 ## 理解实现
 

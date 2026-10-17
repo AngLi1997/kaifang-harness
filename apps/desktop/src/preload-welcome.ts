@@ -3,7 +3,7 @@ import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-acc
 
 import { contextBridge, ipcRenderer } from 'electron'
 import { resolveDesktopLocale } from './locale.ts'
-import { WELCOME_IPC, type WelcomeApi, type WelcomeNotice, type WelcomeSaveResult } from './welcome-api.ts'
+import { WELCOME_IPC, type WelcomeApi, type WelcomeNotice, type WelcomeSaveResult, type SystemConnectionSaveResult, type SystemConnection, type PasswordCredentials, type PasswordSignInResult } from './welcome-api.ts'
 
 const prefix = '--dsh-welcome-locale='
 const locale = process.argv.find(argument => argument.startsWith(prefix))?.slice(prefix.length)
@@ -24,6 +24,11 @@ const api: WelcomeApi = {
     return () => { ipcRenderer.removeListener(WELCOME_IPC.state, receive) }
   },
   saveApiKey: (value: string) => ipcRenderer.invoke(WELCOME_IPC.saveApiKey, value) as Promise<WelcomeSaveResult>,
+  readSystemConnection: () => ipcRenderer.invoke(WELCOME_IPC.readSystemConnection) as Promise<SystemConnection>,
+  saveSystemConnection: (value: SystemConnection) =>
+    ipcRenderer.invoke(WELCOME_IPC.saveSystemConnection, value) as Promise<SystemConnectionSaveResult>,
+  passwordSignIn: (value: PasswordCredentials) =>
+    ipcRenderer.invoke(WELCOME_IPC.passwordSignIn, value) as Promise<PasswordSignInResult>,
   skip: () => ipcRenderer.invoke(WELCOME_IPC.skip) as Promise<void>,
 }
 contextBridge.exposeInMainWorld('dshWelcome', api)

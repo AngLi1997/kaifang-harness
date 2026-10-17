@@ -2,7 +2,7 @@
 
 import type { DesktopShortcutInput, ShortcutConfigSnapshot, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation } from './ipc.ts'
+import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation, type KaifangAccountView } from './ipc.ts'
 import { PLATFORM_IPC } from './platform-ipc.ts'
 import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
 import { syncNativeTheme } from './preload-theme.ts'
@@ -15,6 +15,17 @@ function createProductApi(): DshDesktopProductApi {
     protocolVersion: 1,
     browser: createDesktopBrowserBridge(),
     deviceInfo: () => ipcRenderer.invoke(DESKTOP_IPC.deviceInfo) as Promise<string>,
+    kaifang: {
+      current: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangAccount) as Promise<KaifangAccountView | null>,
+      signIn: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangSignIn) as Promise<void>,
+      signOut: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangSignOut) as Promise<void>,
+      refresh: () => ipcRenderer.invoke(DESKTOP_IPC.kaifangRefresh) as Promise<void>,
+      subscribe(listener) {
+        const handle = (_event: Electron.IpcRendererEvent, account: KaifangAccountView | null): void => { listener(account) }
+        ipcRenderer.on(DESKTOP_IPC.kaifangChanged, handle)
+        return () => { ipcRenderer.off(DESKTOP_IPC.kaifangChanged, handle) }
+      },
+    },
     keyboard: {
       closeWindow: revision => ipcRenderer.invoke(DESKTOP_IPC.shortcutsCloseWindow, revision) as Promise<void>,
       subscribe: (listener) => {

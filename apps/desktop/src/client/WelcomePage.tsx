@@ -4,9 +4,9 @@ import type { FormEvent } from 'react'
 import { Toast } from '@deepseek-ai/dsh-client-ui-primitives/src/Toast.tsx'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives/src/StateDot.tsx'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { WelcomeApi } from '../welcome-api.ts'
+import type { PasswordSignInResult, SystemConnectionSaveResult, WelcomeApi } from '../welcome-api.ts'
 
-type Page = 'entry' | 'key' | 'account'
+type Page = 'entry' | 'account' | 'settings' | 'password'
 
 /**
  * Render the standalone welcome flow using shell-owned operations and localized copy.
@@ -26,22 +26,34 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   const [cancelling, setCancelling] = useState(false)
   const [copyFeedback, setCopyFeedback] = useState<{ status: 'idle' | 'busy' | 'copied' | 'failed' }>({ status: 'idle' })
   const copyState = copyFeedback.status
-  const [draft, setDraft] = useState('')
-  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const mounted = useRef(true)
   const revision = useRef(0)
-  const input = useRef<HTMLInputElement>(null)
-  const keyButton = useRef<HTMLButtonElement>(null)
+  const [systemUrl, setSystemUrl] = useState('')
+  const [webUrl, setWebUrl] = useState('')
+  const [authCode, setAuthCode] = useState('')
+  const [settingsError, setSettingsError] = useState<{ field: 'url' | 'web' | 'code' | 'form'; text: string } | null>(null)
+  const [savedNotice, setSavedNotice] = useState(false)
+  const urlInput = useRef<HTMLInputElement>(null)
+  const webUrlInput = useRef<HTMLInputElement>(null)
+  const codeInput = useRef<HTMLInputElement>(null)
+  const settingsButton = useRef<HTMLButtonElement>(null)
   const focusEntry = useRef(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [passwordError, setPasswordError] = useState<{ field: 'username' | 'password' | 'form'; text: string } | null>(null)
+  const usernameInput = useRef<HTMLInputElement>(null)
+  const passwordInput = useRef<HTMLInputElement>(null)
+  const passwordEntryButton = useRef<HTMLButtonElement>(null)
+  const focusPasswordEntry = useRef(false)
 
   function navigate(next: Page) {
     pageRef.current = next
     setPage(next)
   }
   function showAccount(state: AccountView) {
-    if (pageRef.current === 'key' || (state.attempt === null && pageRef.current === 'entry')) return
+    if (pageRef.current === 'settings' || pageRef.current === 'password' || (state.attempt === null && pageRef.current === 'entry')) return
     attemptRef.current = state.attempt
     setAttempt(state.attempt)
     setStarting(false)
@@ -72,10 +84,14 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   useEffect(() => {
     if (page === 'entry' && visiblePage.current !== 'entry') void api.analytics?.('auth_page_view', {})
     visiblePage.current = page
-    if (page === 'key') input.current?.focus()
-    else if (page === 'entry' && focusEntry.current) {
+    if (page === 'settings') urlInput.current?.focus()
+    else if (page === 'password') usernameInput.current?.focus()
+    else if (page === 'entry' && focusPasswordEntry.current) {
+      focusPasswordEntry.current = false
+      passwordEntryButton.current?.focus()
+    } else if (page === 'entry' && focusEntry.current) {
       focusEntry.current = false
-      keyButton.current?.focus()
+      settingsButton.current?.focus()
     }
   }, [page, api])
 
@@ -85,41 +101,120 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     return () => { clearTimeout(timer) }
   }, [copyFeedback])
 
-  async function saveKey(event: FormEvent) {
+  async function openSettings() {
+    if (busyRef.current) return
+    setSettingsError(null)
+    try {
+      const saved = await api.readSystemConnection()
+      if (!mounted.current) return
+      setSystemUrl(saved.systemUrl)
+      setWebUrl(saved.webUrl)
+      setAuthCode(saved.authCode)
+    } catch {
+      if (mounted.current) setSettingsError({ field: 'form', text: m.welcomeSettingsFailed })
+    }
+    if (mounted.current) navigate('settings')
+  }
+  function leaveSettings() {
+    if (busyRef.current) return
+    setSettingsError(null)
+    focusEntry.current = true
+    navigate('entry')
+  }
+  function settingsFailure(result: Exclude<SystemConnectionSaveResult, { ok: true }>) {
+    switch (result.reason) {
+      case 'url-required': return { field: 'url', text: m.welcomeSystemUrlRequired } as const
+      case 'url-invalid': return { field: 'url', text: m.welcomeSystemUrlInvalid } as const
+      case 'web-url-required': return { field: 'web', text: m.welcomeWebUrlRequired } as const
+      case 'web-url-invalid': return { field: 'web', text: m.welcomeSystemUrlInvalid } as const
+      case 'auth-code-required': return { field: 'code', text: m.welcomeAuthCodeRequired } as const
+      case 'write-failed': return { field: 'form', text: m.welcomeSettingsFailed } as const
+      default: {
+        const unknownReason: never = result.reason
+        throw new Error(`desktop welcome: unknown settings failure ${String(unknownReason)}`)
+      }
+    }
+  }
+  async function saveSettings(event: FormEvent) {
     event.preventDefault()
     if (busyRef.current) return
-    void api.analytics?.('api_key_save_click', {})
-    const value = draft.trim()
-    if (!/^[\x21-\x7e]+$/.test(value) || /^[A-Z][A-Z0-9_]*=[^=]/.test(value)
-      || ((value.startsWith('"') || value.startsWith("'") || value.charCodeAt(0) === 96) && value.at(-1) === value[0])) {
-      setError(value === '' ? m.welcomeKeyBlank : m.welcomeKeyInvalid)
-      input.current?.focus()
+    const local = systemUrl.trim() === '' ? settingsFailure({ ok: false, reason: 'url-required' })
+      : webUrl.trim() === '' ? settingsFailure({ ok: false, reason: 'web-url-required' })
+        : authCode.trim() === '' ? settingsFailure({ ok: false, reason: 'auth-code-required' }) : null
+    const settingsInput = (field: 'url' | 'web' | 'code' | 'form') => field === 'code' ? codeInput : field === 'web' ? webUrlInput : urlInput
+    if (local !== null) {
+      setSettingsError(local)
+      settingsInput(local.field).current?.focus()
       return
     }
     busyRef.current = true
     setBusy(true)
-    setError('')
+    setSettingsError(null)
     try {
-      const result = await api.saveApiKey(value)
+      const result = await api.saveSystemConnection({ systemUrl: systemUrl.trim(), webUrl: webUrl.trim(), authCode: authCode.trim() })
       if (!mounted.current) return
-      if (result.ok) setDraft('')
-      else setError(m.welcomeKeyFailed)
+      if (result.ok) {
+        setSavedNotice(true)
+        focusEntry.current = true
+        navigate('entry')
+      } else {
+        const failure = settingsFailure(result)
+        setSettingsError(failure)
+        if (failure.field !== 'form') settingsInput(failure.field).current?.focus()
+      }
     } catch {
-      if (mounted.current) setError(m.welcomeKeyFailed)
+      if (mounted.current) setSettingsError({ field: 'form', text: m.welcomeSettingsFailed })
     } finally {
       busyRef.current = false
       if (mounted.current) setBusy(false)
     }
   }
-  async function skip() {
+  function openPassword() {
+    setPasswordError(null)
+    setPassword('')
+    navigate('password')
+  }
+  function leavePassword() {
     if (busyRef.current) return
+    setPasswordError(null)
+    setPassword('')
+    focusPasswordEntry.current = true
+    navigate('entry')
+  }
+  function passwordFailure(result: Exclude<PasswordSignInResult, { ok: true }>) {
+    switch (result.reason) {
+      case 'username-required': return { field: 'username', text: m.welcomeUsernameRequired } as const
+      case 'password-required': return { field: 'password', text: m.welcomePasswordRequired } as const
+      case 'invalid-credentials': return { field: 'form', text: m.welcomePasswordInvalid } as const
+      case 'unreachable': return { field: 'form', text: m.welcomePasswordUnreachable } as const
+      case 'failed': return { field: 'form', text: m.welcomePasswordFailed } as const
+      default: {
+        const unknownReason: never = result.reason
+        throw new Error(`desktop welcome: unknown password sign-in failure ${String(unknownReason)}`)
+      }
+    }
+  }
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault()
+    if (busyRef.current) return
+    const local = username.trim() === '' ? passwordFailure({ ok: false, reason: 'username-required' })
+      : password === '' ? passwordFailure({ ok: false, reason: 'password-required' }) : null
+    if (local !== null) {
+      setPasswordError(local)
+      ;(local.field === 'password' ? passwordInput : usernameInput).current?.focus()
+      return
+    }
     busyRef.current = true
     setBusy(true)
+    setPasswordError(null)
     try {
-      await api.skip()
-      if (mounted.current) setDraft('')
+      const result = await api.passwordSignIn({ username: username.trim(), password })
+      if (!mounted.current || result.ok) return
+      const failure = passwordFailure(result)
+      setPasswordError(failure)
+      ;(failure.field === 'username' ? usernameInput : passwordInput).current?.focus()
     } catch {
-      if (mounted.current) setError(m.welcomeContinueFailed)
+      if (mounted.current) setPasswordError({ field: 'form', text: m.welcomePasswordFailed })
     } finally {
       busyRef.current = false
       if (mounted.current) setBusy(false)
@@ -169,25 +264,65 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   const title = phase === 'initializing' ? m.welcomeAuthStarting
     : waiting ? m.welcomeAuthWaiting : phase === 'expired' ? m.welcomeAuthExpired
       : phase === 'failed' ? m.welcomeAuthFailed : m.welcomeAuthExchanging
-  const heading = page === 'entry' ? 'welcome-heading' : page === 'key' ? 'key-title' : 'auth-status'
+  const heading = page === 'entry' ? 'welcome-heading' : page === 'settings' ? 'settings-title'
+    : page === 'password' ? 'password-title' : 'auth-status'
 
   return <>
     {expiryNotice && <Toast text={m.welcomeSessionExpired} onDone={() => { setExpiryNotice(false) }} />}
+    {savedNotice && <Toast text={m.welcomeSettingsSaved} onDone={() => { setSavedNotice(false) }} />}
     <div className="titlebar" aria-hidden="true" />
     <main className="welcome" aria-labelledby={heading}>
-      <img className="brand" src="assets/welcome-brand.svg" alt={m.welcomeBrand} width="472" height="40" />
+      <div className="brand">
+        <img className="brand-logo" src="assets/kaifang-logo.png" alt={m.welcomeBrand} width="40" height="39" />
+        <span className="brand-name" aria-hidden="true">{m.welcomeBrand}</span>
+      </div>
       <div id="tagline" className="tagline" hidden={page !== 'entry'}>
         <h1 id="welcome-heading"><span>{m.welcomeTaglineBefore}</span><em>{m.welcomeTaglineBrand}</em><span>{m.welcomeTaglineAfter}</span></h1>
         <p id="welcome-description">{m.welcomeDescription}</p>
       </div>
-      <form id="key-form" className="key-form" hidden={page !== 'key'} noValidate onSubmit={(event) => { void saveKey(event) }} aria-busy={busy}>
-        <header className="key-heading"><h1 id="key-title">{m.welcomeKeyTitle}</h1><p id="key-description">{m.welcomeKeyDescription}</p></header>
-        <div className="key-field">
-          <label className="visually-hidden" htmlFor="key-input">{m.welcomeKeyPlaceholder}</label>
-          <input ref={input} id="key-input" type="password" autoComplete="new-password" autoCapitalize="off" spellCheck={false} required
-            aria-describedby="key-description key-error" aria-invalid={error !== ''} placeholder={m.welcomeKeyPlaceholder}
-            value={draft} disabled={busy} onChange={(event) => { setDraft(event.target.value); setError('') }} />
-          <p id="key-error" className="key-error" role="alert" hidden={error === ''}>{error}</p>
+      <form id="settings-form" className="key-form settings-form" hidden={page !== 'settings'} noValidate onSubmit={(event) => { void saveSettings(event) }} aria-busy={busy}>
+        <header className="key-heading"><h1 id="settings-title">{m.welcomeSettingsTitle}</h1><p id="settings-description">{m.welcomeSettingsDescription}</p></header>
+        <div className="settings-fields">
+          <div className="key-field">
+            <label className="field-label" htmlFor="system-url">{m.welcomeSystemUrl}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={urlInput} id="system-url" type="url" autoComplete="off" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="system-url-error" aria-invalid={settingsError?.field === 'url'} placeholder={m.welcomeSystemUrlPlaceholder}
+              value={systemUrl} disabled={busy} onChange={(event) => { setSystemUrl(event.target.value); setSettingsError(null) }} />
+            <p id="system-url-error" className="key-error" role="alert" hidden={settingsError?.field !== 'url'}>{settingsError?.field === 'url' ? settingsError.text : ''}</p>
+          </div>
+          <div className="key-field">
+            <label className="field-label" htmlFor="web-url">{m.welcomeWebUrl}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={webUrlInput} id="web-url" type="url" autoComplete="off" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="web-url-error" aria-invalid={settingsError?.field === 'web'} placeholder={m.welcomeWebUrlPlaceholder}
+              value={webUrl} disabled={busy} onChange={(event) => { setWebUrl(event.target.value); setSettingsError(null) }} />
+            <p id="web-url-error" className="key-error" role="alert" hidden={settingsError?.field !== 'web'}>{settingsError?.field === 'web' ? settingsError.text : ''}</p>
+          </div>
+          <div className="key-field">
+            <label className="field-label" htmlFor="auth-code">{m.welcomeAuthCode}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={codeInput} id="auth-code" type="password" autoComplete="off" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="auth-code-error" aria-invalid={settingsError?.field === 'code'} placeholder={m.welcomeAuthCodePlaceholder}
+              value={authCode} disabled={busy} onChange={(event) => { setAuthCode(event.target.value); setSettingsError(null) }} />
+            <p id="auth-code-error" className="key-error" role="alert" hidden={settingsError === null || settingsError.field === 'url' || settingsError.field === 'web'}>{settingsError !== null && (settingsError.field === 'code' || settingsError.field === 'form') ? settingsError.text : ''}</p>
+          </div>
+        </div>
+      </form>
+      <form id="password-form" className="key-form settings-form" hidden={page !== 'password'} noValidate onSubmit={(event) => { void submitPassword(event) }} aria-busy={busy}>
+        <header className="key-heading"><h1 id="password-title">{m.welcomePasswordTitle}</h1><p id="password-description">{m.welcomePasswordDescription}</p></header>
+        <div className="settings-fields">
+          <div className="key-field">
+            <label className="field-label" htmlFor="username">{m.welcomeUsername}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={usernameInput} id="username" type="text" autoComplete="username" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="username-error" aria-invalid={passwordError?.field === 'username'} placeholder={m.welcomeUsernamePlaceholder}
+              value={username} disabled={busy} onChange={(event) => { setUsername(event.target.value); setPasswordError(null) }} />
+            <p id="username-error" className="key-error" role="alert" hidden={passwordError?.field !== 'username'}>{passwordError?.field === 'username' ? passwordError.text : ''}</p>
+          </div>
+          <div className="key-field">
+            <label className="field-label" htmlFor="password">{m.welcomePassword}<span className="required" aria-hidden="true">*</span></label>
+            <input ref={passwordInput} id="password" type="password" autoComplete="current-password" autoCapitalize="off" spellCheck={false} required
+              aria-describedby="password-error" aria-invalid={passwordError !== null && passwordError.field !== 'username'} placeholder={m.welcomePasswordPlaceholder}
+              value={password} disabled={busy} onChange={(event) => { setPassword(event.target.value); setPasswordError(null) }} />
+            <p id="password-error" className="key-error" role="alert" hidden={passwordError === null || passwordError.field === 'username'}>{passwordError !== null && passwordError.field !== 'username' ? passwordError.text : ''}</p>
+          </div>
         </div>
       </form>
       <section id="auth-page" className={`key-heading ${waiting ? 'auth-waiting' : phase === 'expired' ? 'auth-expired' : ''}`}
@@ -203,23 +338,32 @@ export function Welcome({ api }: { api: WelcomeApi }) {
           <StateDot state="ongoing" size={16} className="welcome-loading" />
         </button>
         <button id="auth-retry" className="primary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeAuthRetry}</button>
-        <button id="auth-api-key" className="secondary" type="button" hidden={!failed} onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
         <button id="auth-cancel" className="secondary" type="button" hidden={failed}
           disabled={cancelling || phase === 'committing' || phase === 'succeeded' || (phase === 'initializing' && !attempt?.id)}
           onClick={() => { void cancel() }}>{m.welcomeAuthCancel}</button>
       </div>
       <div id="entry-actions" className="actions" hidden={page !== 'entry'}>
         <button id="sign-in" className="primary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeSignIn}</button>
-        <button ref={keyButton} id="api-key" className="secondary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
+        <button ref={passwordEntryButton} id="password-sign-in" className="secondary" type="button" onClick={openPassword}>{m.welcomePasswordSignIn}</button>
       </div>
-      <div id="key-actions" className="actions" hidden={page !== 'key'}>
-        <button id="save-key" className="primary" type="submit" form="key-form" disabled={busy || draft.trim() === ''}>{m.welcomeKeySave}</button>
-        <button id="skip-key" className="secondary" type="button" disabled={busy} onClick={() => { void skip() }}>{m.welcomeKeyLater}</button>
-        <button id="back-to-login" className="back" type="button" disabled={busy} onClick={() => {
-          if (busyRef.current) return
-          setDraft(''); setError(''); focusEntry.current = true; navigate('entry')
-        }}>{m.welcomeKeyBack}</button>
+      <div id="password-actions" className="actions" hidden={page !== 'password'}>
+        <button id="submit-password" className="primary" type="submit" form="password-form" disabled={busy}
+          aria-label={busy ? m.welcomeAuthExchanging : undefined}>
+          {busy && page === 'password' ? <StateDot state="ongoing" size={16} className="welcome-loading" /> : m.welcomePasswordSubmit}
+        </button>
+        <button id="password-back" className="secondary" type="button" disabled={busy} onClick={leavePassword}>{m.welcomeSettingsBack}</button>
+      </div>
+      <div id="settings-actions" className="actions" hidden={page !== 'settings'}>
+        <button id="save-settings" className="primary" type="submit" form="settings-form" disabled={busy}>{m.welcomeSettingsSave}</button>
+        <button id="settings-back" className="secondary" type="button" disabled={busy} onClick={leaveSettings}>{m.welcomeSettingsBack}</button>
       </div>
     </main>
+    <button ref={settingsButton} id="open-settings" className="settings-button" type="button" hidden={page !== 'entry'}
+      aria-label={m.welcomeSettings} title={m.welcomeSettings} onClick={() => { void openSettings() }}>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.66 0-1.25.4-1.51 1z" />
+      </svg>
+    </button>
   </>
 }

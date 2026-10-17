@@ -10,3 +10,5 @@
   config:
     step: done
     completion: completed
+    # The scenario drives the DeepSeek account launcher, not the KaifangLab sign-in page.
+    kaifangSignIn: false

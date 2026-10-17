@@ -35,7 +35,7 @@ kind: "package-reference"
 <details>
 <summary>维护者信息 — 点击展开</summary>
 
-插件挂载生成的 `knowledge` Remote 贡献，并在其生命周期内只订阅一次目录流。页面通过注入的 `knowledgeCatalog` hook 读取目录，所有宿主操作以回调传入。`@` 来源、用户文本规则和键控的 `conversation.user.text.node` 渲染器使用宿主给出的规范引用 `@[name](dsh-knowledge:id)`；输入框中的标签使用文件夹外观。侧边栏条目的 order 为 20，位于“插件”和“自动化任务”之后。
+插件挂载生成的 `knowledge` Remote 贡献，并在其生命周期内只订阅一次目录流。页面通过注入的 `knowledgeCatalog` hook 读取目录，所有宿主操作以回调传入。`@` 来源、用户文本规则和键控的 `conversation.user.text.node` 渲染器使用宿主给出的规范引用 `@[name](dsh-knowledge:id)`；输入框中的标签使用文件夹外观。侧边栏条目的 order 为 2，紧接在“档案工具”之下、“自动化任务”之上。
 
 </details>
 

@@ -60,6 +60,7 @@
     { "path": "./packages/experimental/client-ui-voice-input" },
     { "path": "./packages/experimental/client-ui-knowledge" },
     { "path": "./packages/experimental/client-ui-claude-code-mods" },
+    { "path": "./packages/kaifang/client-ui-archive-tools" },
 
     { "path": "./packages/client/ui-sidebar-terminal" },
     { "path": "./packages/api/terminal-controller/tsconfig.client.json" },

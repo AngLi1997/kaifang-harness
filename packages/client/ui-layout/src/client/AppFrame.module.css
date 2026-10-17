@@ -108,33 +108,22 @@
 }
 
 :global([data-platform='darwin']) .sidebarCol {
-  /* A blue wash over the top of the translucent tint, gone by a third of the
-     column; a faint blue-grey-violet rises through the bottom third; and a
-     faint blue cast is mixed into the tint itself. Every layer stays
-     transparent so vibrancy shows. */
+  /* Kaifang sign-in ground: a faint brand-red glow in the top-left corner, a
+     warm red rise through the bottom third, and a warm cast mixed into the
+     tint itself. Every layer stays transparent so vibrancy shows. */
   background:
-    linear-gradient(
-      to bottom,
-      rgb(122 155 240 / 0.1),
-      rgb(122 155 240 / 0) 35%,
-      rgb(143 137 184 / 0) 68%,
-      rgb(143 137 184 / 0.09)
-    ),
-    color-mix(in srgb, color-mix(in srgb, var(--dsw-specific-sidebar-fill) 97%, rgb(122 155 240)) 40%, transparent);
+    radial-gradient(ellipse at 0% 0%, rgb(143 36 40 / 0.07), rgb(143 36 40 / 0) 45%),
+    linear-gradient(to bottom, rgb(143 36 40 / 0) 68%, rgb(143 36 40 / 0.04)),
+    color-mix(in srgb, color-mix(in srgb, var(--dsw-specific-sidebar-fill) 94%, rgb(239 224 214)) 55%, transparent);
   border-right: none;
 }
 
-/* Dark drops the blue cast (the light-mode wash reads purple over dark fills)
-   and thins the fill so more wallpaper shows; the washes stay. */
+/* Dark drops the warm cast and thins the fill so more wallpaper shows; the
+   brand glows stay. */
 :global([data-platform='darwin']) :global([data-ds-dark-theme]) .sidebarCol {
   background:
-    linear-gradient(
-      to bottom,
-      rgb(122 155 240 / 0.08),
-      rgb(122 155 240 / 0) 35%,
-      rgb(143 137 184 / 0) 68%,
-      rgb(143 137 184 / 0.07)
-    ),
+    radial-gradient(ellipse at 0% 0%, rgb(194 72 76 / 0.08), rgb(194 72 76 / 0) 45%),
+    linear-gradient(to bottom, rgb(194 72 76 / 0) 68%, rgb(194 72 76 / 0.05)),
     color-mix(in srgb, var(--dsw-specific-sidebar-fill) 50%, transparent);
 }
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /** Account operations in the shipped client composition, in Desktop and in a plain browser. */
-import { afterEach, beforeEach, expect, vi } from 'vitest'
+import { afterEach, beforeEach, expect, onTestFinished, vi } from 'vitest'
 import { ok } from '@deepseek-ai/dsh-remote-mock'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
@@ -20,6 +20,8 @@ import { CONTACT_CONFIG_GLOBAL } from '../src/contact-config.ts'
 import { AccountPlatformHost } from '../src/client/AccountPlatformHost.tsx'
 import type { AccountPlatformHostInjected } from '../src/client/AccountPlatformHost.tsx'
 import { AccountQuotaNotice } from '../src/client/AccountQuotaNotice.tsx'
+import type { KaifangWebSignInInjected } from '../src/client/KaifangWebSignIn.tsx'
+import { KAIFANG_CALLBACK_KEY } from '../src/client/kaifang-web.ts'
 import type { AccountQuotaNoticeInjected } from '../src/client/AccountQuotaNotice.tsx'
 
 const it = createClientTest({ roster: webApp })
@@ -772,4 +774,129 @@ it('applies API-key defaults through the desktop slot and shared configuration o
   expect(hasApiKey).toHaveBeenCalled()
   expect(values['ui-settings']).toEqual({ enabled: true })
   expect(values['ui-chat']).toMatchObject({ transcriptView: 'standard' })
+}, 60_000)
+
+it('routes every Desktop sign-in entry to the KaifangLab sign-in page instead of the DeepSeek Platform', async ({ start }) => {
+  const signIn = vi.fn(() => Promise.resolve())
+  vi.stubGlobal('dshDesktop', {
+    kaifang: { current: vi.fn(() => Promise.resolve(null)), signIn, signOut: vi.fn(), subscribe: vi.fn(() => () => {}) },
+  })
+  const c = await start()
+  const actions = operations(c)
+  await actions.start()
+  expect(signIn).toHaveBeenCalledOnce()
+  expect(c.mock.remote.account.startSignIn).not.toHaveBeenCalled()
+  expect(actions.hooks.account.getSnapshot().loginVisible).toBe(false)
+}, 60_000)
+
+function kaifangSignInPage(c: TestClient) {
+  return c.ctx.slots.entries('shell.overlay').find(entry => entry.options.id === 'kaifang-sign-in')
+}
+
+it('keeps a plain browser on the DeepSeek sign-in when the KaifangLab sign-in page is not enabled', async ({ start }) => {
+  const c = await start()
+  expect(kaifangSignInPage(c)).toBeUndefined()
+}, 60_000)
+
+it('covers a plain browser with the KaifangLab sign-in page when the Web bundle enables it', async ({ start }) => {
+  vi.stubGlobal(CONTACT_CONFIG_GLOBAL, { kaifangSignIn: true, kaifangRequestTimeoutMs: 1_000 })
+  localStorage.clear()
+  localStorage.setItem('dsh.kaifang.session', JSON.stringify({ systemUrl: 'http://127.0.0.1:9999', accessToken: 'old', expiresAt: 1,
+    user: { username: 'old', displayName: 'Old', email: null, avatarUrl: null } }))
+  const open = vi.spyOn(window, 'open').mockReturnValue(null)
+  const fetch = vi.fn<typeof globalThis.fetch>(async input => String(input).endsWith('/access_token')
+    ? Response.json({ code: 200, data: { access_token: 'opaque' } })
+    : Response.json({ code: 200, data: { username: 'admin', nickname: '超级管理员', email: null, avatar: null } }))
+  vi.stubGlobal('fetch', fetch)
+  onTestFinished(() => { localStorage.clear() })
+  const c = await start()
+  const entry = kaifangSignInPage(c)
+  expect(entry).toBeDefined()
+  const page = injectedOf(entry!) as KaifangWebSignInInjected
+  expect(page.hooks.kaifang.getSnapshot()).toEqual({ account: null, browser: { phase: 'idle' } })
+  const actions = operations(c)
+  await actions.start()
+  expect(c.mock.remote.account.startSignIn).not.toHaveBeenCalled()
+  expect(actions.hooks.account.getSnapshot().loginVisible).toBe(false)
+
+  const changed = vi.fn()
+  const stop = page.hooks.kaifang.subscribe(changed)
+  expect(page.saveConnection({ ...page.connection(), authCode: 'code' })).toEqual({ ok: true })
+  page.startBrowserSignIn()
+  const authorize = new URL(String(open.mock.calls[0]![0]))
+  expect(authorize.searchParams.get('redirect_uri')).toBe(new URL('kaifang/callback.html', document.baseURI).href)
+  const state = authorize.searchParams.get('state')!
+  expect(state).toMatch(/^[0-9a-f]{48}$/)
+  window.dispatchEvent(new StorageEvent('storage', { key: 'other', newValue: '{}' }))
+  window.dispatchEvent(new StorageEvent('storage', { key: KAIFANG_CALLBACK_KEY, newValue: JSON.stringify({ token: 'opaque', state }) }))
+  await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().kaifang?.displayName).toBe('超级管理员') })
+  page.cancelBrowserSignIn()
+  expect(changed).toHaveBeenCalled()
+  stop()
+  await actions.kaifangSignOut!()
+  expect(actions.hooks.account.getSnapshot().kaifang).toBeUndefined()
+  expect(await page.passwordSignIn({ username: 'admin', password: 'x' })).toEqual({ ok: true })
+  expect(actions.hooks.account.getSnapshot().kaifang?.username).toBe('admin')
+}, 60_000)
+
+it('re-reads the KaifangLab profile at startup, on focus, and on the configured period while the window is visible', async ({ start }) => {
+  vi.stubGlobal(CONTACT_CONFIG_GLOBAL, { kaifangRefreshIntervalMs: 1_000 })
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  let pending: PromiseWithResolvers<undefined> | undefined
+  const refresh = vi.fn(() => { pending = Promise.withResolvers<undefined>(); return pending.promise })
+  const account = { username: 'admin', displayName: '管理员', email: null, avatarUrl: null }
+  vi.stubGlobal('dshDesktop', { kaifang: {
+    current: vi.fn(() => Promise.resolve(account)), signIn: vi.fn(), signOut: vi.fn(), refresh, subscribe: vi.fn(() => () => {}),
+  } })
+  const c = await start()
+  await vi.waitFor(() => { expect(refresh).toHaveBeenCalledOnce() })
+  expect(operations(c).hooks.account.getSnapshot().kaifang).toEqual(account)
+  window.dispatchEvent(new Event('focus'))
+  expect(refresh).toHaveBeenCalledOnce()
+  pending!.reject(new Error('ipc'))
+  await vi.waitFor(() => { expect(error).toHaveBeenCalledWith('[kaifang-account] account refresh failed', expect.any(Error)) })
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(refresh).toHaveBeenCalledOnce()
+  visibility.mockRestore()
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(refresh).toHaveBeenCalledTimes(2)
+  pending!.resolve(undefined)
+  await vi.waitFor(() => { expect(refresh).toHaveBeenCalledTimes(3) }, { timeout: 3_000 })
+}, 60_000)
+
+it('does not re-read a KaifangLab profile while signed out', async ({ start }) => {
+  const refresh = vi.fn(() => Promise.resolve())
+  const current = vi.fn(() => Promise.resolve(null))
+  vi.stubGlobal('dshDesktop', { kaifang: { current, signIn: vi.fn(), signOut: vi.fn(), refresh, subscribe: vi.fn(() => () => {}) } })
+  await start()
+  await vi.waitFor(() => { expect(current).toHaveBeenCalled() })
+  window.dispatchEvent(new Event('focus'))
+  expect(refresh).not.toHaveBeenCalled()
+}, 60_000)
+
+it('reports a failed Desktop KaifangLab account read without publishing an account', async ({ start }) => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.stubGlobal('dshDesktop', { kaifang: {
+    current: vi.fn(() => Promise.reject(new Error('ipc'))), signIn: vi.fn(), signOut: vi.fn(), subscribe: vi.fn(() => () => {}),
+  } })
+  const c = await start()
+  await vi.waitFor(() => { expect(error).toHaveBeenCalledWith('[kaifang-account] account read failed', expect.any(Error)) })
+  expect(operations(c).hooks.account.getSnapshot().kaifang).toBeUndefined()
+}, 60_000)
+
+it('keeps a Desktop KaifangLab account published before the initial read resolves', async ({ start }) => {
+  const read = Promise.withResolvers<null>()
+  let listener: ((account: { username: string; displayName: string; email: null; avatarUrl: null } | null) => void) | undefined
+  vi.stubGlobal('dshDesktop', { kaifang: {
+    current: vi.fn(() => read.promise), signIn: vi.fn(), signOut: vi.fn(), refresh: vi.fn(() => Promise.resolve()),
+    subscribe: vi.fn((next: typeof listener) => { listener = next; return () => {} }),
+  } })
+  const c = await start()
+  const account = { username: 'admin', displayName: '超级管理员', email: null, avatarUrl: null }
+  listener!(account)
+  read.resolve(null)
+  await read.promise
+  await Promise.resolve()
+  expect(operations(c).hooks.account.getSnapshot().kaifang).toEqual(account)
 }, 60_000)

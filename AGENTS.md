@@ -65,6 +65,7 @@ packages/    @deepseek-ai/dsh-<pkg> workspaces at packages/<group>/<pkg>/
   client/               GUI client
   mcp/                  external tools
   experimental/         evaluated capabilities without a product-support commitment
+  kaifang/              Kaifang built-in plugins
   test-support/         test infrastructure
   util/                 zero-dependency utilities
 python/      Python SDK/runtime (python/README.md)

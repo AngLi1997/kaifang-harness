@@ -1,4 +1,4 @@
-/** Public contact and bonus notice options shared by Host and Client. */
+/** Public contact, bonus notice, and KaifangLab Web sign-in options shared by Host and Client. */
 import z from '@deepseek-ai/schemastery'
 
 /** Questionnaire destination and bonus notice timings shared by Host and Client. */
@@ -11,6 +11,15 @@ export interface ContactConfig {
   bonusAckRetryDelayMs: number
   /** Ceiling for the acknowledgement retry backoff. */
   bonusAckRetryMaxDelayMs: number
+  /**
+   * Whether a plain browser shows the KaifangLab sign-in page until an account signs in.
+   * The Web app bundle enables it; Desktop uses its welcome window instead.
+   */
+  kaifangSignIn: boolean
+  /** Deadline for one KaifangLab request made by the Web sign-in page. */
+  kaifangRequestTimeoutMs: number
+  /** Period between KaifangLab profile re-reads while an account is signed in; focusing the window also re-reads it. */
+  kaifangRefreshIntervalMs: number
 }
 /** Validate public questionnaire options. */
 export const ContactConfigFields = {
@@ -18,6 +27,9 @@ export const ContactConfigFields = {
   contactSource: z.string().default(''),
   bonusAckRetryDelayMs: z.number().min(1).default(1_000),
   bonusAckRetryMaxDelayMs: z.number().min(1).default(60_000),
+  kaifangSignIn: z.boolean().default(false),
+  kaifangRequestTimeoutMs: z.number().min(1).default(15_000),
+  kaifangRefreshIntervalMs: z.number().min(1_000).default(60_000),
 }
 /** Validate public questionnaire options. */
 export const ContactConfig: z<Partial<ContactConfig>, ContactConfig> = z.object(ContactConfigFields)
