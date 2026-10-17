@@ -24,7 +24,7 @@ export const zh = {
   'tool.pdf.desc': '保留原始图像外观，叠加可搜索的文字层，便于归档与检索。',
   'tool.repair.name': 'AI 修档案',
   'tool.repair.desc': '自动裁切黑边、去除扫描噪点，还原干净平整的档案页面。',
-  'tool.polish.name': '插件润色',
+  'tool.polish.name': '文档润色',
   'tool.polish.desc': '润色插件说明、界面文案与提示词，统一表达与术语。',
   'tool.demo.name': 'Demo 测试',
   'tool.demo.desc': '在线连通性与能力演示，用于验证工具调用链路。',
