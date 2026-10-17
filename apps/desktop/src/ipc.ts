@@ -34,6 +34,7 @@ export const DESKTOP_IPC = {
   kaifangAccount: 'dsh-desktop:kaifang-account',
   kaifangSignIn: 'dsh-desktop:kaifang-sign-in',
   kaifangSignOut: 'dsh-desktop:kaifang-sign-out',
+  kaifangRefresh: 'dsh-desktop:kaifang-refresh',
   kaifangChanged: 'dsh-desktop:kaifang-changed',
 } as const
 
@@ -99,6 +100,11 @@ export interface DshDesktopProductApi {
     signIn(): Promise<void>
     /** @returns after the session is removed; the welcome window opens when no other sign-in remains. */
     signOut(): Promise<void>
+    /**
+     * Re-read the stored session's profile.
+     * @returns after the read settles; a changed account reaches `subscribe`, and a failed read keeps the stored account.
+     */
+    refresh(): Promise<void>
     /** @param listener - receives each sign-in and sign-out. @returns subscription disposer. */
     subscribe(listener: (account: KaifangAccountView | null) => void): () => void
   }

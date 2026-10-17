@@ -10,6 +10,7 @@ import { SignInDialog } from './SignInDialog.tsx'
 import { LogoutIcon } from './LogoutIcon.tsx'
 import { AccountAvatar } from './AccountAvatar.tsx'
 import { AccountNoticeCard } from './AccountNotice.tsx'
+import kaifangDefaultAvatar from './assets/kaifang-avatar.png'
 import css from './AccountMenu.module.css'
 
 /** Account launcher composed by the settings shell. */
@@ -77,7 +78,7 @@ export function AccountMenu({
             {kaifang.avatarUrl !== null && kaifangAvatarFailed !== kaifang.avatarUrl
               ? <img className={css.picture} src={kaifang.avatarUrl} alt="" referrerPolicy="no-referrer"
                 onError={() => { setKaifangAvatarFailed(kaifang.avatarUrl) }} />
-              : <IconUserOutlineMedium size={16} />}
+              : <img className={css.picture} src={kaifangDefaultAvatar} alt="" />}
           </span>
           : signedIn
             ? <span className={css.avatar} data-avatar-status={account.avatar?.status}>

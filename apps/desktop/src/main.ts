@@ -625,6 +625,37 @@ async function main(): Promise<void> {
     await enterWorkspace()
     return { ok: true }
   }
+  /** Re-read the stored session's profile so KaifangLab nickname, email, and picture edits reach the workspace. */
+  const refreshKaifangUser = async (): Promise<void> => {
+    const userData = app.getPath('userData')
+    let session: KaifangSession | undefined
+    let established: { ok: true; session: KaifangSession } | KaifangFailure
+    try {
+      const connection = await readSystemConnection(userData)
+      session = await readKaifangSession(userData, connection.systemUrl, Date.now())
+      if (session === undefined) return
+      established = await establishKaifangSession(connection, session.accessToken,
+        (input, init) => net.fetch(input, init), kaifangTimeoutMs())
+    } catch (error) {
+      console.warn('desktop kaifang: could not refresh the account', error)
+      return
+    }
+    // A failed read keeps the stored account; sign-out stays an explicit user action.
+    if (!established.ok) return
+    const user = established.session.user
+    if (kaifangUser !== undefined && kaifangUser.username === user.username && kaifangUser.displayName === user.displayName
+      && kaifangUser.email === user.email && kaifangUser.avatarUrl === user.avatarUrl) return
+    try {
+      const latest = await readKaifangSession(userData, session.systemUrl, Date.now())
+      // A sign-out or another sign-in during the request owns the session file.
+      if (latest?.accessToken !== session.accessToken) return
+      await writeKaifangSession(userData, established.session)
+    } catch (error) {
+      console.warn('desktop kaifang: could not save the refreshed account', error)
+      return
+    }
+    publishKaifangUser(user)
+  }
   const kaifangBrowser = new KaifangBrowserSignIn({
     ttlMs: resolveDurationMs(process.env, 'DSH_DESKTOP_KAIFANG_BROWSER_SIGN_IN_TTL_MS', 600_000),
     publish: (view) => {
@@ -866,6 +897,10 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.kaifangSignOut, async (event) => {
     assertProductSender(event)
     await signOutKaifang()
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangRefresh, async (event) => {
+    assertProductSender(event)
+    await refreshKaifangUser()
   })
   ipcMain.handle(DESKTOP_IPC.onboardingApiKey, async (event) => {
     assertProductSender(event)

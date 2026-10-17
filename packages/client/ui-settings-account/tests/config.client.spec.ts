@@ -8,14 +8,18 @@ import { CONTACT_CONFIG_GLOBAL } from '../src/contact-config.ts'
 it('injects configured contact and KaifangLab sign-in options and removes the listener on disposal', async () => {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
-  const options = { contactSource: 'harness', bonusAckRetryDelayMs: 25, bonusAckRetryMaxDelayMs: 100, kaifangSignIn: true, kaifangRequestTimeoutMs: 500 }
+  const options = {
+    contactSource: 'harness', bonusAckRetryDelayMs: 25, bonusAckRetryMaxDelayMs: 100,
+    kaifangSignIn: true, kaifangRequestTimeoutMs: 500, kaifangRefreshIntervalMs: 2_000,
+  }
   const config: Config = Config(options)
   await ctx.plugin({ Config, apply }, options)
   const table: IndexInjection[] = []
   ctx.emit('webserver/index-inject', table)
   expect(table).toEqual([{ kind: 'global', name: CONTACT_CONFIG_GLOBAL, value: {
     contactFormUrl: config.contactFormUrl, contactSource: config.contactSource,
-    bonusAckRetryDelayMs: 25, bonusAckRetryMaxDelayMs: 100, kaifangSignIn: true, kaifangRequestTimeoutMs: 500,
+    bonusAckRetryDelayMs: 25, bonusAckRetryMaxDelayMs: 100,
+    kaifangSignIn: true, kaifangRequestTimeoutMs: 500, kaifangRefreshIntervalMs: 2_000,
   } }])
   await ctx.fiber.dispose()
   table.length = 0

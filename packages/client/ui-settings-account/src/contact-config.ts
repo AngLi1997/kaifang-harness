@@ -18,6 +18,8 @@ export interface ContactConfig {
   kaifangSignIn: boolean
   /** Deadline for one KaifangLab request made by the Web sign-in page. */
   kaifangRequestTimeoutMs: number
+  /** Period between KaifangLab profile re-reads while an account is signed in; focusing the window also re-reads it. */
+  kaifangRefreshIntervalMs: number
 }
 /** Validate public questionnaire options. */
 export const ContactConfigFields = {
@@ -27,6 +29,7 @@ export const ContactConfigFields = {
   bonusAckRetryMaxDelayMs: z.number().min(1).default(60_000),
   kaifangSignIn: z.boolean().default(false),
   kaifangRequestTimeoutMs: z.number().min(1).default(15_000),
+  kaifangRefreshIntervalMs: z.number().min(1_000).default(60_000),
 }
 /** Validate public questionnaire options. */
 export const ContactConfig: z<Partial<ContactConfig>, ContactConfig> = z.object(ContactConfigFields)

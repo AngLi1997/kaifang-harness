@@ -839,6 +839,42 @@ it('covers a plain browser with the KaifangLab sign-in page when the Web bundle 
   expect(actions.hooks.account.getSnapshot().kaifang?.username).toBe('admin')
 }, 60_000)
 
+it('re-reads the KaifangLab profile at startup, on focus, and on the configured period while the window is visible', async ({ start }) => {
+  vi.stubGlobal(CONTACT_CONFIG_GLOBAL, { kaifangRefreshIntervalMs: 1_000 })
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  let pending: PromiseWithResolvers<undefined> | undefined
+  const refresh = vi.fn(() => { pending = Promise.withResolvers<undefined>(); return pending.promise })
+  const account = { username: 'admin', displayName: '管理员', email: null, avatarUrl: null }
+  vi.stubGlobal('dshDesktop', { kaifang: {
+    current: vi.fn(() => Promise.resolve(account)), signIn: vi.fn(), signOut: vi.fn(), refresh, subscribe: vi.fn(() => () => {}),
+  } })
+  const c = await start()
+  await vi.waitFor(() => { expect(refresh).toHaveBeenCalledOnce() })
+  expect(operations(c).hooks.account.getSnapshot().kaifang).toEqual(account)
+  window.dispatchEvent(new Event('focus'))
+  expect(refresh).toHaveBeenCalledOnce()
+  pending!.reject(new Error('ipc'))
+  await vi.waitFor(() => { expect(error).toHaveBeenCalledWith('[kaifang-account] account refresh failed', expect.any(Error)) })
+  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(refresh).toHaveBeenCalledOnce()
+  visibility.mockRestore()
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(refresh).toHaveBeenCalledTimes(2)
+  pending!.resolve(undefined)
+  await vi.waitFor(() => { expect(refresh).toHaveBeenCalledTimes(3) }, { timeout: 3_000 })
+}, 60_000)
+
+it('does not re-read a KaifangLab profile while signed out', async ({ start }) => {
+  const refresh = vi.fn(() => Promise.resolve())
+  const current = vi.fn(() => Promise.resolve(null))
+  vi.stubGlobal('dshDesktop', { kaifang: { current, signIn: vi.fn(), signOut: vi.fn(), refresh, subscribe: vi.fn(() => () => {}) } })
+  await start()
+  await vi.waitFor(() => { expect(current).toHaveBeenCalled() })
+  window.dispatchEvent(new Event('focus'))
+  expect(refresh).not.toHaveBeenCalled()
+}, 60_000)
+
 it('reports a failed Desktop KaifangLab account read without publishing an account', async ({ start }) => {
   const error = vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.stubGlobal('dshDesktop', { kaifang: {
@@ -853,7 +889,7 @@ it('keeps a Desktop KaifangLab account published before the initial read resolve
   const read = Promise.withResolvers<null>()
   let listener: ((account: { username: string; displayName: string; email: null; avatarUrl: null } | null) => void) | undefined
   vi.stubGlobal('dshDesktop', { kaifang: {
-    current: vi.fn(() => read.promise), signIn: vi.fn(), signOut: vi.fn(),
+    current: vi.fn(() => read.promise), signIn: vi.fn(), signOut: vi.fn(), refresh: vi.fn(() => Promise.resolve()),
     subscribe: vi.fn((next: typeof listener) => { listener = next; return () => {} }),
   } })
   const c = await start()

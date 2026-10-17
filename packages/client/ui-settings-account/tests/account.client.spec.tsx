@@ -746,12 +746,24 @@ it.each([en, zh])('shows the Desktop KaifangLab account in the launcher and sign
   const picture = trigger.querySelector('img')!
   expect(picture.getAttribute('src')).toBe('http://localhost:5173/favicon.png')
   fireEvent.error(picture)
-  expect(trigger.querySelector('img')).toBeNull()
-  expect(trigger.querySelector('svg')).not.toBeNull()
+  expect(trigger.querySelector('img')!.getAttribute('src')).toMatch(/kaifang-avatar\.png$/)
   fireEvent.click(trigger)
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([copy.settings, copy.contactUs, copy.signOut])
   await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: copy.signOut })) })
   expect(kaifangSignOut).toHaveBeenCalledOnce()
   expect(base.signOut).not.toHaveBeenCalled()
   expect(base.hasRunningAccountTasks).not.toHaveBeenCalled()
+})
+
+it('shows the KaifangLab logo for a KaifangLab account without a picture', async () => {
+  const base = operationsOf({ status: 'signed-out', attempt: null })
+  const kaifang = { username: 'admin', displayName: '管理员', email: null, avatarUrl: null }
+  const snapshot = { ...base.hooks.account.getSnapshot(), kaifang }
+  const { AccountMenu } = await import('../src/client/AccountMenu.tsx')
+  render(<AccountMenu {...({} as GlobalStandardProps)} {...base} settingsOpen={false}
+    useAccount={selector => selector(snapshot)}
+    useTheme={selector => selector(base.hooks.theme.getSnapshot())} wide openOnboarding={() => {}} openSettings={() => {}}
+    t={key => key in en ? en[key as AccountKey] : key} />)
+  const trigger = screen.getByRole('button', { name: en.menu })
+  expect(trigger.querySelector('img')!.getAttribute('src')).toMatch(/kaifang-avatar\.png$/)
 })

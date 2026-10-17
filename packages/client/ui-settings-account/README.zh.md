@@ -70,6 +70,8 @@ Desktop preload 标记在账号凭证已存储后启用引导。进度属于本�
 
 未登录 KaifangLab 账号时，Web 登录页覆盖工作区。页面提供一键登录、账号密码登录，以及用于配置系统 URL、认证页面 URL 和授权码的设置；浏览器把这些设置和登录会话（含访问令牌）保存在当前源的 localStorage 中。会话随令牌过期，修改系统 URL 会丢弃会话。账号密码登录向系统 URL 提交账号和密码，因此 KaifangLab 服务端必须通过 CORS 允许当前源；`kaifangRequestTimeoutMs` 限制每次请求的时长。一键登录在新标签页打开 `{认证页面 URL}/authorize`，附带随机 state，并回调到 Web 客户端的 `kaifang/callback.html`。KaifangLab 只接受回环 http 源上的该回调，因此仅当 Web 客户端通过 127.0.0.1 或 localhost 打开时一键登录可用。回调页通过 localStorage 交回令牌，工作区标签页只接受当前待处理的 state，回调标签页随后自行关闭。侧栏账号按钮随后显示 KaifangLab 昵称，退出登录后回到登录页。
 
+登录 KaifangLab 账号后，侧栏账号按钮在启动时、窗口获得焦点或变为可见时，以及每隔 `kaifangRefreshIntervalMs`（默认 60 秒）用已保存的令牌重新读取账号资料，因此在 KaifangLab 修改的昵称、邮箱和头像无需重新登录即可显示。重新读取失败时保留已保存的账号。没有头像或头像加载失败时显示 KaifangLab 标志。
+
 <a id="understand-the-implementation"></a>
 ## 理解实现
 

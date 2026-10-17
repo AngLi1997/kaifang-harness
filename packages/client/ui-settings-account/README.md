@@ -70,6 +70,8 @@ Every sign-in entry (the sidebar launcher, Account settings, and the model onboa
 
 The Web sign-in page covers the workspace while no KaifangLab account is signed in. It offers one-click sign-in, password sign-in, and Settings for the system URL, sign-in page URL, and authorization code; the browser keeps those settings and the signed-in session, including its access token, in this origin's localStorage. A session expires with its token, and changing the system URL discards it. Password sign-in posts the account and password to the system URL, so the KaifangLab server must accept this origin through CORS; `kaifangRequestTimeoutMs` bounds each request. One-click sign-in opens `{sign-in page URL}/authorize` in a new tab with a random state and a redirect to the Web client's `kaifang/callback.html`. KaifangLab accepts that redirect only on a loopback http origin, so one-click sign-in works when the Web client is opened at 127.0.0.1 or localhost. The callback page hands the token back through localStorage, the workspace tab accepts only the pending state, and the callback tab closes itself. The sidebar launcher then shows the KaifangLab nickname, and Sign out returns to the sign-in page.
 
+While a KaifangLab account is signed in, the launcher re-reads its profile with the stored token at startup, whenever the window gains focus or becomes visible, and every `kaifangRefreshIntervalMs` (default 60 seconds), so nickname, email, and picture changes made in KaifangLab appear without signing in again. A failed re-read keeps the stored account. An account without a picture, or whose picture fails to load, shows the KaifangLab logo.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 

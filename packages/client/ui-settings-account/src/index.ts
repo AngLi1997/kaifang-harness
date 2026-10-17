@@ -31,6 +31,7 @@ export const Config = z.object({
   bonusAckRetryMaxDelayMs: ContactConfigFields.bonusAckRetryMaxDelayMs,
   kaifangSignIn: ContactConfigFields.kaifangSignIn,
   kaifangRequestTimeoutMs: ContactConfigFields.kaifangRequestTimeoutMs,
+  kaifangRefreshIntervalMs: ContactConfigFields.kaifangRefreshIntervalMs,
   version: OnboardingSettingsFields.version.volatile(),
   step: OnboardingSettingsFields.step.volatile(),
   purpose: OnboardingSettingsFields.purpose.volatile(),
@@ -54,6 +55,7 @@ export function apply(ctx: Context, config: Config): void {
       contactFormUrl: config.contactFormUrl, contactSource: config.contactSource,
       bonusAckRetryDelayMs: config.bonusAckRetryDelayMs, bonusAckRetryMaxDelayMs: config.bonusAckRetryMaxDelayMs,
       kaifangSignIn: config.kaifangSignIn, kaifangRequestTimeoutMs: config.kaifangRequestTimeoutMs,
+      kaifangRefreshIntervalMs: config.kaifangRefreshIntervalMs,
     } satisfies ContactConfig })
   })
 }

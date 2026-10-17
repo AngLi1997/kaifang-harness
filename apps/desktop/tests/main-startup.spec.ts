@@ -535,6 +535,35 @@ describe('desktop main startup', () => {
     expect(harness.windows).toHaveLength(1)
   })
 
+  it('re-reads the stored KaifangLab profile and publishes only a changed account', async () => {
+    const directory = join(harness.app.getPath('userData'), 'desktop')
+    mkdirSync(directory, { recursive: true })
+    const session = join(directory, 'kaifang-session.json')
+    const user = { username: 'admin', displayName: 'Admin', email: null, avatarUrl: 'http://localhost:5173/favicon.png' }
+    writeFileSync(session, JSON.stringify({ systemUrl: 'http://127.0.0.1:9999', accessToken: 't', expiresAt: null, user }))
+    const { net } = await import('electron')
+    const profile = (data: Record<string, unknown>) => Response.json({ code: 200, data })
+    await readyForUpdate()
+    const send = harness.windows[0]!.webContents.send
+    await vi.waitFor(() => { expect(send).toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, user) })
+    send.mockClear()
+    vi.spyOn(net, 'fetch').mockResolvedValueOnce(profile({ username: 'admin', nickname: 'Admin', avatar: '/favicon.png' }))
+    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
+    expect(send).not.toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, expect.anything())
+    vi.spyOn(net, 'fetch').mockResolvedValueOnce(Response.json({ code: 401 }, { status: 401 }))
+    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
+    expect(send).not.toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, expect.anything())
+    vi.spyOn(net, 'fetch').mockResolvedValueOnce(profile({ username: 'admin', nickname: '新昵称', avatar: '/api/v1/base/avatar/7' }))
+    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
+    const changed = { ...user, displayName: '新昵称', avatarUrl: 'http://localhost:5173/api/v1/base/avatar/7' }
+    expect(send).toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, changed)
+    expect(JSON.parse(readFileSync(session, 'utf8'))).toMatchObject({ accessToken: 't', user: changed })
+    rmSync(session)
+    send.mockClear()
+    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
+    expect(send).not.toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, expect.anything())
+  })
+
   it('installs hidden native DevTools shortcuts in the macOS application menu', async () => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' })
     await readyForUpdate()

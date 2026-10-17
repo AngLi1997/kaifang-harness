@@ -181,7 +181,27 @@ export function apply(ctx: Context): void {
     }
     let changed = false
     ctx.effect(() => kaifang.subscribe((account) => { changed = true; show(account) }), 'account: KaifangLab identity')
-    void kaifang.current().then((account) => { if (!changed && !disposed) show(account) }, (error: unknown) => {
+    // KaifangLab profile edits (nickname, email, picture) reach the launcher at startup, on window focus, and on a fixed period.
+    // Focus and visibility events arrive together; one in-flight re-read serves both.
+    let refreshing = false
+    const refreshKaifang = (): void => {
+      if (refreshing || disposed || snapshot.kaifang === undefined || document.visibilityState === 'hidden') return
+      refreshing = true
+      kaifang.refresh()
+        .catch((error: unknown) => { console.error('[kaifang-account] account refresh failed', error) })
+        .finally(() => { refreshing = false })
+    }
+    ctx.effect(() => {
+      const timer = setInterval(refreshKaifang, config.kaifangRefreshIntervalMs)
+      window.addEventListener('focus', refreshKaifang)
+      document.addEventListener('visibilitychange', refreshKaifang)
+      return () => {
+        clearInterval(timer)
+        window.removeEventListener('focus', refreshKaifang)
+        document.removeEventListener('visibilitychange', refreshKaifang)
+      }
+    }, 'account: KaifangLab profile refresh')
+    void kaifang.current().then((account) => { if (!changed && !disposed) show(account); refreshKaifang() }, (error: unknown) => {
       console.error('[kaifang-account] account read failed', error)
     })
   }

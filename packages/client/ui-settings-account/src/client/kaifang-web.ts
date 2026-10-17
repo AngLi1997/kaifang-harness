@@ -172,6 +172,20 @@ export class WebKaifang implements KaifangBridge {
     return Promise.resolve()
   }
 
+  /** @returns after the stored session's profile is re-read; a failed read keeps the stored account. */
+  async refresh(): Promise<void> {
+    const session = this.readSession()
+    if (session === undefined) return
+    const profile = await this.profile(session.accessToken)
+    if (!profile.ok || this.readSession()?.accessToken !== session.accessToken) return
+    const current = this.state.account
+    const user = profile.user
+    if (current !== null && current.username === user.username && current.displayName === user.displayName
+      && current.email === user.email && current.avatarUrl === user.avatarUrl) return
+    if (!this.write(SESSION_KEY, { ...session, user } satisfies Session)) return
+    this.publish({ ...this.state, account: user })
+  }
+
   /** @param listener - receives each sign-in and sign-out. @returns subscription disposer. */
   subscribe(listener: (account: KaifangAccount | null) => void): () => void {
     this.accountListeners.add(listener)
@@ -263,25 +277,36 @@ export class WebKaifang implements KaifangBridge {
 
   private async establish(accessToken: string): Promise<{ ok: true } | Failure> {
     const { systemUrl } = this.connection()
+    const profile = await this.profile(accessToken)
+    if (!profile.ok) return profile
+    const { user } = profile
+    const session: Session = { systemUrl, accessToken, expiresAt: jwtExpiry(accessToken), user }
+    if (!this.write(SESSION_KEY, session)) return { ok: false, reason: 'failed' }
+    this.publish({ account: user, browser: { phase: 'idle' } })
+    return { ok: true }
+  }
+
+  /** Read the account profile for a token from the saved system URL. */
+  private async profile(accessToken: string): Promise<{ ok: true; user: KaifangAccount } | Failure> {
+    const { systemUrl, webUrl } = this.connection()
     const profile = await this.call(endpoint(systemUrl, USERINFO_PATH), { method: 'GET', headers: { token: accessToken, accept: 'application/json' } })
     if (!profile.ok) return profile
     const { username, nickname, email, avatar } = profile.data
     if (typeof username !== 'string' || username === '') return { ok: false, reason: 'failed' }
     let avatarUrl: string | null = null
     if (typeof avatar === 'string' && avatar !== '') {
-      const url = new URL(avatar, this.connection().webUrl)
+      const url = new URL(avatar, webUrl)
       if (url.protocol === 'http:' || url.protocol === 'https:') avatarUrl = url.href
     }
-    const user: KaifangAccount = {
-      username,
-      displayName: typeof nickname === 'string' && nickname.trim() !== '' ? nickname.trim() : username,
-      email: typeof email === 'string' && email !== '' ? email : null,
-      avatarUrl,
+    return {
+      ok: true,
+      user: {
+        username,
+        displayName: typeof nickname === 'string' && nickname.trim() !== '' ? nickname.trim() : username,
+        email: typeof email === 'string' && email !== '' ? email : null,
+        avatarUrl,
+      },
     }
-    const session: Session = { systemUrl, accessToken, expiresAt: jwtExpiry(accessToken), user }
-    if (!this.write(SESSION_KEY, session)) return { ok: false, reason: 'failed' }
-    this.publish({ account: user, browser: { phase: 'idle' } })
-    return { ok: true }
   }
 
   /** Send one KaifangLab request and decode its `{ code, msg, data }` envelope. */

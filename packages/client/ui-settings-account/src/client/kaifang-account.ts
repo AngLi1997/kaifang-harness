@@ -17,6 +17,12 @@ export interface KaifangBridge {
   signIn(): Promise<void>
   /** @returns after the Desktop removes the session and returns to its welcome window when nothing else signs in. */
   signOut(): Promise<void>
+  /**
+   * Re-read the stored session's profile.
+   * @returns after the read settles; a changed nickname, email, or picture reaches {@link KaifangBridge.subscribe},
+   * and a failed read keeps the stored account.
+   */
+  refresh(): Promise<void>
   /** @param listener - receives each sign-in and sign-out. @returns subscription disposer. */
   subscribe(listener: (account: KaifangAccount | null) => void): () => void
 }
