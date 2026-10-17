@@ -455,6 +455,14 @@ describe('draft documents in the input shell', () => {
     expect(chips(shell)).toEqual([])
   })
 
+  it('applies an initial document with its reference chips', () => {
+    const shell = makeShell()
+    const prompt = documentOf('ask ', session, ' ')
+    expect(shell.requestDraftInitialization({ prompt, clearPreviousDraft: true })).toBe('applied')
+    expect(shell.draftSnapshot).toEqual(prompt)
+    expect(chips(shell)).toHaveLength(1)
+  })
+
   it('preserves existing text or attachments unless target text is explicitly cleared', () => {
     const shell = makeShell()
     const old = documentOf('existing ', session)

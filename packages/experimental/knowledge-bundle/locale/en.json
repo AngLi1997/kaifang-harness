@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Local knowledge bases",
+    "description": "Index local folders and added files, then mention a knowledge base with @ to search it or ask about it."
+  }
+}

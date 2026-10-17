@@ -1424,6 +1424,82 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'knowledge',
+    summary: 'Local knowledge base registry, indexer, and retriever.',
+    description: 'Local knowledge base registry, indexer, and retriever.',
+    methods: [
+      {
+        signature: 'list(): KnowledgeBaseSummary[]',
+        description: 'Snapshot every knowledge base.',
+        parameters: [],
+        returns: 'definitions with index status, in creation order.',
+      },
+      {
+        signature: '@Remote catalog(): KnowledgeCatalog',
+        description: 'Read the browser-facing catalog.',
+        parameters: [],
+        returns: 'bases and retrieval configuration.',
+      },
+      {
+        signature: '@Remote({ mode: \'stream\' }) async *follow(signal: AbortSignal): AsyncIterable<KnowledgeCatalog>',
+        description: 'Follow the catalog: the current snapshot, then one snapshot per change, at most every 250 ms during indexing.',
+        parameters: [{ name: 'signal', description: 'observation lifetime.' }],
+        returns: 'complete catalog snapshots.',
+      },
+      {
+        signature: '@Remote async create(input: KnowledgeBaseInput): Promise<KnowledgeBaseSummary>',
+        description: 'Create a knowledge base and start indexing it.',
+        parameters: [{ name: 'input', description: 'name and directories.' }],
+        returns: 'the new base.',
+      },
+      {
+        signature: '@Remote async update(update: KnowledgeBaseUpdate): Promise<KnowledgeBaseSummary>',
+        description: 'Rename a knowledge base or replace its directories; a directory change re-indexes it.',
+        parameters: [{ name: 'update', description: 'id and replacement fields.' }],
+        returns: 'the updated base.',
+      },
+      {
+        signature: '@Remote(\'delete\') async remove(id: KnowledgeBaseId): Promise<void>',
+        description: 'Delete a knowledge base, its index, and its uploaded files. Configured directories are untouched.',
+        parameters: [{ name: 'id', description: 'base to delete.' }],
+      },
+      {
+        signature: '@Remote reindex(id: KnowledgeBaseId): void',
+        description: 'Re-scan a knowledge base now.',
+        parameters: [{ name: 'id', description: 'base to re-index.' }],
+      },
+      {
+        signature: '@Remote async files(id: KnowledgeBaseId): Promise<KnowledgeFilePage>',
+        description: 'List indexed files of a knowledge base.',
+        parameters: [{ name: 'id', description: 'base to list.' }],
+        returns: 'files sorted by path, bounded by the configured listing limit.',
+      },
+      {
+        signature: '@Remote async upload(request: KnowledgeUploadRequest): Promise<KnowledgeFileEntry>',
+        description: 'Copy one browser file into a knowledge base\'s upload directory and index it.',
+        parameters: [{ name: 'request', description: 'target base, file name, and base64 content.' }],
+        returns: 'the stored file, pending indexing.',
+      },
+      {
+        signature: '@Remote async deleteUpload(id: KnowledgeBaseId, path: string): Promise<void>',
+        description: 'Delete an uploaded file and drop it from the index.',
+        parameters: [{ name: 'id', description: 'owning base.' }, { name: 'path', description: 'absolute path inside the base\'s upload directory.' }],
+      },
+      {
+        signature: '@Remote async search(request: KnowledgeSearchRequest, signal: AbortSignal): Promise<KnowledgeSearchResult>',
+        description: 'Search knowledge bases. Bases that are still indexing return what is indexed so far.',
+        parameters: [{ name: 'request', description: 'query, bases, and hit limit.' }, { name: 'signal', description: 'cancellation.' }],
+        returns: 'ranked hits and the searched bases.',
+      },
+      {
+        signature: '@Remote candidates(query: string, signal: AbortSignal): KnowledgeMentionCandidate[]',
+        description: 'List `@` menu candidates whose name contains the query.',
+        parameters: [{ name: 'query', description: 'case-insensitive name substring; empty lists every base.' }, { name: 'signal', description: 'caller cancellation.' }],
+        returns: 'candidates with canonical mentions, bounded by the configured limit.',
+      },
+    ],
+  },
+  {
     key: 'llm',
     summary: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
     description: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
@@ -5880,6 +5956,82 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'JsonValue',
     declaration: 'export type JsonValue = null | boolean | number | string | JsonValue[] | {\n    [key: string]: JsonValue;\n};',
+  },
+  {
+    name: 'KnowledgeBaseDefinition',
+    declaration: 'export interface KnowledgeBaseDefinition {\n    id: KnowledgeBaseId;\n    name: string;\n    directories: string[];\n    createdAt: number;\n    updatedAt: number;\n}',
+  },
+  {
+    name: 'KnowledgeBaseId',
+    declaration: 'export type KnowledgeBaseId = Branded<\'KnowledgeBaseId\'>;',
+  },
+  {
+    name: 'KnowledgeBaseInput',
+    declaration: 'export interface KnowledgeBaseInput {\n    name: string;\n    directories: string[];\n}',
+  },
+  {
+    name: 'KnowledgeBaseSummary',
+    declaration: 'export interface KnowledgeBaseSummary extends KnowledgeBaseDefinition {\n    mention: string;\n    uploadDirectory: string;\n    status: KnowledgeIndexStatus;\n}',
+  },
+  {
+    name: 'KnowledgeBaseUpdate',
+    declaration: 'export interface KnowledgeBaseUpdate extends KnowledgeBaseInput {\n    id: KnowledgeBaseId;\n}',
+  },
+  {
+    name: 'KnowledgeCatalog',
+    declaration: 'export interface KnowledgeCatalog {\n    bases: KnowledgeBaseSummary[];\n    retrieval: KnowledgeRetrievalMode;\n    embedder?: string;\n    maxUploadBytes: number;\n    extensions: string[];\n}',
+  },
+  {
+    name: 'KnowledgeFileEntry',
+    declaration: 'export interface KnowledgeFileEntry {\n    path: string;\n    root: string;\n    size: number;\n    mtimeMs: number;\n    state: KnowledgeFileState;\n    chunks: number;\n    uploaded: boolean;\n    error?: string;\n}',
+  },
+  {
+    name: 'KnowledgeFilePage',
+    declaration: 'export interface KnowledgeFilePage {\n    files: KnowledgeFileEntry[];\n    truncated: boolean;\n}',
+  },
+  {
+    name: 'KnowledgeFileState',
+    declaration: 'export type KnowledgeFileState = \'pending\' | \'indexed\' | \'failed\';',
+  },
+  {
+    name: 'KnowledgeIndexPhase',
+    declaration: 'export type KnowledgeIndexPhase = \'pending\' | \'scanning\' | \'indexing\' | \'embedding\' | \'ready\' | \'error\';',
+  },
+  {
+    name: 'KnowledgeIndexStatus',
+    declaration: 'export interface KnowledgeIndexStatus {\n    phase: KnowledgeIndexPhase;\n    totalFiles: number;\n    indexedFiles: number;\n    failedFiles: number;\n    chunkCount: number;\n    vectorCount: number;\n    indexedAt?: number;\n    error?: string;\n    watching: boolean;\n    missingDirectories: string[];\n    fileLimitReached: boolean;\n}',
+  },
+  {
+    name: 'KnowledgeMatchSignal',
+    declaration: 'export type KnowledgeMatchSignal = \'bm25\' | \'vector\';',
+  },
+  {
+    name: 'KnowledgeMentionCandidate',
+    declaration: 'export interface KnowledgeMentionCandidate {\n    id: KnowledgeBaseId;\n    name: string;\n    indexedFiles: number;\n    phase: KnowledgeIndexPhase;\n    mention: string;\n}',
+  },
+  {
+    name: 'KnowledgeRetrievalMode',
+    declaration: 'export type KnowledgeRetrievalMode = \'bm25\' | \'hybrid\';',
+  },
+  {
+    name: 'KnowledgeSearchedBase',
+    declaration: 'export interface KnowledgeSearchedBase {\n    id: KnowledgeBaseId;\n    name: string;\n    phase: KnowledgeIndexPhase;\n}',
+  },
+  {
+    name: 'KnowledgeSearchHit',
+    declaration: 'export interface KnowledgeSearchHit {\n    knowledgeBaseId: KnowledgeBaseId;\n    knowledgeBaseName: string;\n    path: string;\n    heading?: string;\n    lineStart: number;\n    text: string;\n    score: number;\n    matchedBy: KnowledgeMatchSignal[];\n}',
+  },
+  {
+    name: 'KnowledgeSearchRequest',
+    declaration: 'export interface KnowledgeSearchRequest {\n    query: string;\n    knowledgeBaseIds: KnowledgeBaseId[];\n    limit: number;\n}',
+  },
+  {
+    name: 'KnowledgeSearchResult',
+    declaration: 'export interface KnowledgeSearchResult {\n    hits: KnowledgeSearchHit[];\n    searched: KnowledgeSearchedBase[];\n    mode: KnowledgeRetrievalMode;\n}',
+  },
+  {
+    name: 'KnowledgeUploadRequest',
+    declaration: 'export interface KnowledgeUploadRequest {\n    id: KnowledgeBaseId;\n    fileName: string;\n    contentBase64: string;\n}',
   },
   {
     name: 'KvFacet',

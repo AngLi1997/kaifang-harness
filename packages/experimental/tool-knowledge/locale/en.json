@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Knowledge search tool",
+    "description": "Let agents search local knowledge bases and cite the files they use."
+  }
+}

@@ -280,6 +280,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns append-only Session instances and emits the durable session event feed.',
   },
   {
+    key: 'knowledge',
+    pkg: 'experimental-knowledge',
+    title: 'Experimental local knowledge bases',
+    mode: 'core',
+    consumers: ['experimental-tool-knowledge', 'experimental-client-ui-knowledge'],
+    note: 'Indexes Host folders and uploads into per-base SQLite files and serves BM25 and optional vector search through ctx and the knowledge Remote.',
+  },
+  {
     key: 'speechController',
     pkg: 'experimental-api-speech-to-text',
     title: 'Experimental transcription Remote',

@@ -11,7 +11,7 @@ import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/cli
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { ArbitrateKey, ArbitrateOutcome, Occurrence, ReferenceInsert, TokenSpan } from './draft-editor.ts'
+import type { ArbitrateKey, ArbitrateOutcome, DraftInput, Occurrence, ReferenceInsert, TokenSpan } from './draft-editor.ts'
 import type { InputSubmitMode, MessageSubmission } from './composer-submission.ts'
 
 /** Attachment payload passed to a claimed command submission. */
@@ -229,9 +229,10 @@ export interface SessionInputResolver {
   requestDraftInitialization(binding: SessionBinding, options: DraftInitializationOptions): DraftInitializationResult
 }
 
-/** Initial text for a target Session; attachments remain under their existing owner. */
+/** Initial content for a target Session; attachments remain under their existing owner. */
 export interface DraftInitializationOptions {
-  readonly prompt?: string
+  /** Plain text, or text with reference chips whose spans equal their `clipboardText`. */
+  readonly prompt?: DraftInput
   readonly clearPreviousDraft?: boolean
 }
 

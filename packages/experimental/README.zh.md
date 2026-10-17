@@ -60,6 +60,10 @@ kind: "package-group"
 | [`client-ui-voice-input`](client-ui-voice-input/README.zh.md) | 麦克风录音与版本检查后的草稿插入 | — |
 | [`plugin-market-bundle`](plugin-market-bundle/README.zh.md) | 默认禁用的可选自定义插件市场：市场服务和「发现」标签页 | — |
 | [`voice-input-bundle`](voice-input-bundle/README.zh.md) | 默认禁用的可选语音输入组合 | — |
+| [`knowledge`](knowledge/README.zh.md) | 支持 BM25 与可选向量检索的本地知识库索引 | `ctx.knowledge` |
+| [`tool-knowledge`](tool-knowledge/README.zh.md) | 检索本地知识库的 `knowledge_search` | — |
+| [`client-ui-knowledge`](client-ui-knowledge/README.zh.md) | 知识库页面、`@` 菜单与引用标签 | — |
+| [`knowledge-bundle`](knowledge-bundle/README.zh.md) | 默认禁用的可选本地知识库组合 | — |
 | [`agent-team-profile`](agent-team-profile/README.zh.md) | Agent Teams 协作、工具与 Web UI 组合包 | — |
 | [`agent-team`](agent-team/README.zh.md) | 具名 teammate，成员之间直接消息与持久共享任务板 | `ctx.agentTeams` |
 | [`client-ui-agent-team`](client-ui-agent-team/README.zh.md) | Web Team roster、任务板与 teammate 导航 | — |

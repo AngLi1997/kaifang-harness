@@ -1,0 +1,12 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="18" cy="10.5" rx="8" ry="3" stroke="url(#knowledge-bundle-stack)" stroke-width="2.5" />
+  <path d="M10 10.5V25.5C10 27.157 13.582 28.5 18 28.5C22.418 28.5 26 27.157 26 25.5V10.5" stroke="url(#knowledge-bundle-stack)" stroke-width="2.5" />
+  <path d="M10 18C10 19.657 13.582 21 18 21C22.418 21 26 19.657 26 18" stroke="#658EFF" stroke-width="2.5" />
+  <defs>
+    <linearGradient id="knowledge-bundle-stack" x1="10" y1="7.5" x2="26" y2="28.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41E1AC" />
+      <stop offset="0.65" stop-color="#658EFF" />
+      <stop offset="1" stop-color="#41E1AC" />
+    </linearGradient>
+  </defs>
+</svg>

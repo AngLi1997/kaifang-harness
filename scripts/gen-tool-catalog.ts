@@ -62,6 +62,9 @@ import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
+import KnowledgeRuntime from '@deepseek-ai/dsh-experimental-knowledge'
+import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import * as ToolKnowledge from '@deepseek-ai/dsh-experimental-tool-knowledge'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
 import BrowserUseRegistry from '@deepseek-ai/dsh-browser-use'
 import * as StagehandBrowserTools from '@deepseek-ai/dsh-experimental-browser-use-stagehand-native'
@@ -517,6 +520,20 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'The five read-only tools hide provider cursors and authorize every result from the immutable calling agent session. The package is opt-in; compositions that need enforced deadlines or bounded inline output also mount the generic timeout or spill policies.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-experimental-tool-knowledge',
+    dir: 'tool-knowledge',
+    source: 'packages/experimental/tool-knowledge/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.knowledge'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(TypertRegistry)
+      await ctx.plugin(KnowledgeRuntime, KnowledgeRuntime.Config({ dataRoot: resolve(root, '.tmp/tool-catalog/knowledge'), watch: false }))
+      await ctx.plugin(ToolKnowledge, ToolKnowledge.Config({}))
+    },
+    note:
+      'The read-only search returns passages from local knowledge bases with their file paths; the package is opt-in through the experimental knowledge bundle.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-subagent',

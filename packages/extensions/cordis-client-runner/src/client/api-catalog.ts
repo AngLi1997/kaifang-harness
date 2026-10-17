@@ -592,8 +592,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ConnectionWebSocketEventMap {\n    readonly open: object;\n    readonly error: object;\n    readonly close: object;\n    readonly message: {\n        readonly data: unknown;\n    };\n}',
   },
   {
+    name: 'DraftCommand',
+    declaration: 'export interface DraftCommand {\n    readonly token: string;\n}',
+  },
+  {
     name: 'DraftInitializationOptions',
-    declaration: 'export interface DraftInitializationOptions {\n    readonly prompt?: string;\n    readonly clearPreviousDraft?: boolean;\n}',
+    declaration: 'export interface DraftInitializationOptions {\n    readonly prompt?: DraftInput;\n    readonly clearPreviousDraft?: boolean;\n}',
+  },
+  {
+    name: 'DraftInput',
+    declaration: 'export type DraftInput = string | DraftSnapshot;',
+  },
+  {
+    name: 'DraftReference',
+    declaration: 'export type DraftReference = Omit<Occurrence, \'occurrenceId\'>;',
+  },
+  {
+    name: 'DraftSnapshot',
+    declaration: 'export interface DraftSnapshot {\n    readonly text: string;\n    readonly references: readonly DraftReference[];\n    readonly command?: DraftCommand;\n}',
   },
   {
     name: 'EntryKeyOf',
@@ -740,6 +756,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ObservableSnapshot<T> {\n    getSnapshot(): T;\n    subscribe(fn: () => void): () => void;\n}',
   },
   {
+    name: 'Occurrence',
+    declaration: 'export interface Occurrence {\n    readonly occurrenceId: number;\n    readonly source: string;\n    readonly ref: string;\n    readonly offset: number;\n    readonly length: number;\n    readonly label: string;\n    readonly appearance?: ReferenceInsert[\'appearance\'];\n    readonly clipboardText: string;\n    readonly invalid?: boolean;\n}',
+  },
+  {
     name: 'OpenState',
     declaration: 'export type OpenState = \'cold\' | \'loading\' | \'open\' | \'error\';',
   },
@@ -822,6 +842,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'QueueAction',
     declaration: 'export type QueueAction = {\n    readonly kind: \'edit\';\n    readonly content: readonly TextBlock[];\n} | {\n    readonly kind: \'remove\';\n} | {\n    readonly kind: \'steer\';\n};',
+  },
+  {
+    name: 'ReferenceInsert',
+    declaration: 'export interface ReferenceInsert {\n    readonly source: string;\n    readonly ref: string;\n    readonly label: string;\n    readonly appearance?: \'session\' | \'file\' | \'folder\';\n    readonly clipboardText: string;\n}',
   },
   {
     name: 'RegisterFactory',

@@ -1112,6 +1112,96 @@ export interface InspectorOptions {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-inspector -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-knowledge -->
+<a id="deepseek-aidsh-experimental-knowledge"></a>
+
+## `@deepseek-ai/dsh-experimental-knowledge`
+
+- `inject`: `typert`
+- `source`: [`packages/experimental/knowledge/src/config.ts:31`](../packages/experimental/knowledge/src/config.ts)
+
+```ts config-catalog
+/** Service configuration. */
+export interface Config {
+  /** Directory holding `bases.json`, each base's index, and uploaded files. */
+  dataRoot: string
+  /** Retrieval mode for every search. */
+  retrieval: KnowledgeRetrievalMode
+  /** Embedder used in `hybrid` mode. */
+  embedder: EmbedderConfig
+  /** `eager` vectorizes every chunk after indexing; `on-demand` vectorizes BM25 candidates at query time and keeps them. */
+  vectorize: VectorizeStrategy
+  /** Lowercase extensions with a leading dot that the indexer reads. */
+  extensions: string[]
+  /** Directory base names never entered. Hidden directories are always skipped. */
+  excludedDirectories: string[]
+  /** Largest indexed file in bytes. */
+  maxFileBytes: number
+  /** Maximum files indexed per knowledge base. */
+  maxFilesPerBase: number
+  /** Largest file accepted by one browser upload, in bytes. */
+  maxUploadBytes: number
+  /** Target maximum characters per chunk. */
+  chunkChars: number
+  /** Trailing characters repeated at the start of the next chunk in the same section. */
+  chunkOverlapChars: number
+  /** Whether directory changes trigger incremental indexing. */
+  watch: boolean
+  /** Quiet period after the last directory change before indexing starts, in milliseconds. */
+  watchDebounceMs: number
+  /** Pause after each indexed file and scanned directory, in milliseconds; zero only yields to pending I/O. */
+  indexYieldMs: number
+  /** Chunks embedded per batch during eager vectorization. */
+  embedBatchSize: number
+  /** Knowledge bases indexed at the same time. */
+  concurrentIndexJobs: number
+  /** Candidates each ranking signal contributes before fusion. */
+  candidatePool: number
+  /** Upper bound on hits of one search. */
+  maxSearchLimit: number
+  /** Upper bound on query terms. */
+  maxQueryTerms: number
+  /** Minimum cosine similarity for a vector candidate. */
+  minVectorSimilarity: number
+  /** Reciprocal-rank fusion damping constant. */
+  fusionK: number
+  /** Characters of chunk text returned per hit. */
+  maxHitChars: number
+  /** `@` menu candidates per query. */
+  candidateLimit: number
+  /** Files returned by one file listing. */
+  maxListedFiles: number
+}
+
+/** Retrieval mode applied to every search. `bm25` reads only the full-text index; `hybrid` also ranks by vectors. */
+export type KnowledgeRetrievalMode = 'bm25' | 'hybrid'
+
+/** Embedder selection for `hybrid` retrieval. */
+export type EmbedderConfig =
+  | {
+    /** In-process hashed n-gram vectors; needs no model file or network. */
+    provider: 'hashed-ngram'
+    /** Vector length. */
+    dimensions: number
+  }
+  | {
+    /** An OpenAI-compatible `/embeddings` endpoint that receives chunk text. */
+    provider: 'openai-compatible'
+    /** Endpoint base URL, such as `http://127.0.0.1:11434/v1`. */
+    baseUrl: string
+    /** Model name. */
+    model: string
+    /** Texts per request. */
+    batchSize: number
+    /** Per-request timeout in milliseconds. */
+    timeoutMs: number
+  }
+
+/** When chunk vectors are computed in `hybrid` mode. */
+export type VectorizeStrategy = 'eager' | 'on-demand'
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-knowledge -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-ptc-runtime-python -->
 <a id="deepseek-aidsh-experimental-ptc-runtime-python"></a>
 
@@ -1281,6 +1371,25 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-tool-agent-team -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-tool-knowledge -->
+<a id="deepseek-aidsh-experimental-tool-knowledge"></a>
+
+## `@deepseek-ai/dsh-experimental-tool-knowledge`
+
+- `inject`: `tools` · `systemPrompt` · `knowledge`
+- `source`: [`packages/experimental/tool-knowledge/src/index.ts:22`](../packages/experimental/tool-knowledge/src/index.ts)
+
+```ts config-catalog
+/** Tool limits. */
+export interface Config {
+  /** Hits returned when the model omits `limit`. */
+  defaultLimit: number
+  /** Cooperative timeout of one search, in milliseconds. */
+  timeoutMs: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-tool-knowledge -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-translator -->
 <a id="deepseek-aidsh-experimental-translator"></a>
@@ -3541,7 +3650,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-system-prompt`
 
-- `source`: [`packages/core/system-prompt/src/index.ts:258`](../packages/core/system-prompt/src/index.ts)
+- `source`: [`packages/core/system-prompt/src/index.ts:259`](../packages/core/system-prompt/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
@@ -4632,6 +4741,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-experimental-auto-review` | `approval` · `llm` · `permissionPresets` · `sessions` · `tools` · `workingDirectory` | [`packages/experimental/auto-review/src/index.ts`](../packages/experimental/auto-review/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-client-ui-agent-team` | — | [`packages/experimental/client-ui-agent-team/src/index.ts`](../packages/experimental/client-ui-agent-team/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-client-ui-claude-code-mods` | — | [`packages/experimental/client-ui-claude-code-mods/src/index.ts`](../packages/experimental/client-ui-claude-code-mods/src/index.ts) |
+| `@deepseek-ai/dsh-experimental-client-ui-knowledge` | — | [`packages/experimental/client-ui-knowledge/src/index.ts`](../packages/experimental/client-ui-knowledge/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-client-ui-voice-input` | — | [`packages/experimental/client-ui-voice-input/src/index.ts`](../packages/experimental/client-ui-voice-input/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-computer-use-cua-driver-native` | `computerUse` · `tools` · `systemPrompt` | [`packages/experimental/computer-use-cua-driver-native/src/index.ts`](../packages/experimental/computer-use-cua-driver-native/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-session-inspector` | — | [`packages/experimental/session-inspector/src/index.ts`](../packages/experimental/session-inspector/src/index.ts) |
@@ -4722,6 +4832,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 | `@deepseek-ai/dsh-experimental-browser-use-runtime` | — | [`packages/experimental/browser-use-runtime/src/index.ts`](../packages/experimental/browser-use-runtime/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-cot-translation-bundle` | — | [`packages/experimental/cot-translation-bundle/src/index.ts`](../packages/experimental/cot-translation-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-inspector-profile` | — | [`packages/experimental/inspector-profile/src/index.ts`](../packages/experimental/inspector-profile/src/index.ts) |
+| `@deepseek-ai/dsh-experimental-knowledge-bundle` | — | [`packages/experimental/knowledge-bundle/src/index.ts`](../packages/experimental/knowledge-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-plugin-market-bundle` | — | [`packages/experimental/plugin-market-bundle/src/index.ts`](../packages/experimental/plugin-market-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-ralph-bundle` | — | [`packages/experimental/ralph-bundle/src/index.ts`](../packages/experimental/ralph-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-session-search` | — | [`packages/experimental/session-search/src/index.ts`](../packages/experimental/session-search/src/index.ts) |

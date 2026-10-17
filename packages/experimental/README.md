@@ -60,6 +60,10 @@ Promotion requires a named product role, documented public behavior and limitati
 | [`client-ui-voice-input`](client-ui-voice-input/README.md) | Microphone capture and guarded draft insertion | — |
 | [`plugin-market-bundle`](plugin-market-bundle/README.md) | Default-disabled optional custom plugin markets: the market service and the Discover tab | — |
 | [`voice-input-bundle`](voice-input-bundle/README.md) | Default-disabled optional voice input composition | — |
+| [`knowledge`](knowledge/README.md) | Local knowledge bases indexed for BM25 and optional vector search | `ctx.knowledge` |
+| [`tool-knowledge`](tool-knowledge/README.md) | `knowledge_search` over local knowledge bases | — |
+| [`client-ui-knowledge`](client-ui-knowledge/README.md) | Knowledge base page, `@` menu, and mention chips | — |
+| [`knowledge-bundle`](knowledge-bundle/README.md) | Optional local knowledge base composition, disabled by default | — |
 | [`agent-team-profile`](agent-team-profile/README.md) | Agent Teams collaboration, tools, and Web UI bundle | — |
 | [`agent-team`](agent-team/README.md) | Named teammates with direct messages and a durable shared task board | `ctx.agentTeams` |
 | [`client-ui-agent-team`](client-ui-agent-team/README.md) | Team roster, task board, and teammate navigation for Web | — |

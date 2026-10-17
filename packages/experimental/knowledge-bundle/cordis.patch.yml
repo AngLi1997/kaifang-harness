@@ -1,0 +1,9 @@
+- insert:
+    - id: knowledge
+      name: '@deepseek-ai/dsh-experimental-knowledge'
+      config:
+        dataRoot: !!js dshHomePath('knowledge')
+    - id: tool-knowledge
+      name: '@deepseek-ai/dsh-experimental-tool-knowledge'
+    - id: ui-knowledge
+      name: '@deepseek-ai/dsh-experimental-client-ui-knowledge'
