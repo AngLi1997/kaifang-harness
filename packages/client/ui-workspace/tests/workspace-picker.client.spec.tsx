@@ -125,11 +125,18 @@ function chooseAdd(): void {
 }
 
 describe('WorkspacePicker', () => {
-  it('lists same-title Workspaces separately and forwards the selected id', () => {
-    const b = mount([workspace('alpha', 'Shared'), workspace('beta', 'Shared')])
-    const entries = screen.getAllByRole('menuitem', { name: 'Shared' })
-    expect(entries).toHaveLength(2)
-    fireEvent.click(entries[1]!)
+  it('labels same-title Workspaces with distinguishing path suffixes and forwards the selected id', () => {
+    const b = mount([
+      { ...workspace('alpha', 'Shared'), path: '/one/a/Shared' },
+      { ...workspace('beta', 'Shared'), path: '/two/a/Shared' },
+      workspace('gamma', 'Alone'),
+    ])
+    expect(screen.getAllByRole('menuitem').map(entry => entry.textContent))
+      .toEqual(['Shared one/a/Shared', 'Shared two/a/Shared', 'Alone', '不在任何工作区中工作', '添加工作区…'])
+    // The full path stays reachable when a narrow menu truncates the row.
+    expect(screen.getByText('two/a/Shared').parentElement?.title).toBe('/two/a/Shared')
+    expect(screen.getByRole('menuitem', { name: 'Alone' }).querySelector('[title]')).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Shared two/a/Shared' }))
     expect(b.onPick).toHaveBeenCalledWith(wid('beta'))
   })
 
@@ -148,12 +155,12 @@ describe('WorkspacePicker', () => {
     expect(screen.queryByTestId('directory-flow')).toBeNull()
   })
 
-  it('raises the flow straight from the anchor gesture when adding is the only entry', () => {
-    // Nothing to list and one action left: a one-row menu would offer no
-    // choice, so the owner's open request lands in the flow itself.
+  it('keeps the no-workspace choice beside Add when no Workspaces are listed', () => {
     const b = mount([])
-    expect(screen.queryByRole('menu')).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: '添加工作区…' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: '不在任何工作区中工作' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '添加工作区…' })).toBeTruthy()
+    expect(screen.queryByTestId('directory-flow')).toBeNull()
+    chooseAdd()
     expect(b.onClose).toHaveBeenCalled()
     expect(screen.getByTestId('directory-flow')).toBeTruthy()
   })
@@ -256,12 +263,10 @@ describe('WorkspacePicker', () => {
     expect(screen.getByRole('menuitem', { name: '添加工作区…' })).toBeTruthy()
   })
 
-  it('shows no popover at all when nothing is listed and nothing can be added', () => {
-    // A composition mounting this package without any directory-picker: the
-    // hero anchor has neither a Workspace to pick nor a way to add one, so it
-    // must not claim a choice with an empty menu.
+  it('offers no-workspace selection without a directory flow', () => {
     const b = mount([], vi.fn(), occupancySource(false))
-    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.getByRole('menuitem', { name: '不在任何工作区中工作' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '添加工作区…' })).toBeNull()
     expect(screen.queryByTestId('directory-flow')).toBeNull()
     expect(b.createWorkspace).not.toHaveBeenCalled()
   })

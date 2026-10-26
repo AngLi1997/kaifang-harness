@@ -1,9 +1,12 @@
 /** Public questionnaire and KaifangLab Web sign-in options are emitted in the page bootstrap. */
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it, onTestFinished, vi } from 'vitest'
-import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
+import type { IndexInjection, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { apply, Config } from '../src/index.ts'
 import { CONTACT_CONFIG_GLOBAL } from '../src/contact-config.ts'
+
+/** The Peer an index render speaks for; this listener reads no field of it. */
+const PAGE_PEER = { principal: { kind: 'owner' } } as Parameters<WebServer['renderIndex']>[1]
 
 it('injects configured contact and KaifangLab sign-in options and removes the listener on disposal', async () => {
   const ctx = new Context()
@@ -15,7 +18,7 @@ it('injects configured contact and KaifangLab sign-in options and removes the li
   const config: Config = Config(options)
   await ctx.plugin({ Config, apply }, options)
   const table: IndexInjection[] = []
-  ctx.emit('webserver/index-inject', table)
+  ctx.emit('webserver/index-inject', table, PAGE_PEER)
   expect(table).toEqual([{ kind: 'global', name: CONTACT_CONFIG_GLOBAL, value: {
     contactFormUrl: config.contactFormUrl, contactSource: config.contactSource,
     bonusAckRetryDelayMs: 25, bonusAckRetryMaxDelayMs: 100,
@@ -23,7 +26,7 @@ it('injects configured contact and KaifangLab sign-in options and removes the li
   } }])
   await ctx.fiber.dispose()
   table.length = 0
-  ctx.emit('webserver/index-inject', table)
+  ctx.emit('webserver/index-inject', table, PAGE_PEER)
   expect(table).toEqual([])
 })
 

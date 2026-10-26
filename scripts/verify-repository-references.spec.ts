@@ -97,6 +97,10 @@ describe('maintained repository reference policy', () => {
     expect(scanRepositoryReferences(fixture.root)).toHaveLength(4)
   })
 
+  it('ignores numeric artifact sizes that happen to prefix a commit', () => {
+    expect(findRepositoryReferences('uv.lock', 'size = 6344383', new Set(['6344383']))).toEqual([])
+  })
+
   it('checks available unreachable commits without requiring a branch or network', (test) => {
     const fixture = repository(test)
     const unreachable = fixture.git(['commit-tree', fixture.tree, '-m', 'unreachable fixture'])

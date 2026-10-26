@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { AccountView, AccountDetails } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { OnboardingChange } from './onboarding-contract.ts'
@@ -23,7 +24,7 @@ import { createPlatformPages, type PlatformPages } from './platform-pages.ts'
 import { AccountSection, type AccountSnapshot, type AccountSectionInjected } from './AccountSection.tsx'
 import { createBonusNoticeController } from './bonus-notices.ts'
 import { accountClientMetadata } from './client-metadata.ts'
-import { en, zh, type AccountKey } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, zh, type AccountKey } from './locales.ts'
 import { AccountQuotaNotice, type AccountQuotaNoticeInjected } from './AccountQuotaNotice.tsx'
 import { DESKTOP_ONBOARDING_NAMESPACE, type OnboardingSettings } from '../onboarding-settings.ts'
 import { DesktopOnboardingController } from './onboarding-state.ts'
@@ -44,11 +45,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required by account settings. */
-export const inject = ['slots', 'locale', 'remote', 'remote.account', 'remote.session', 'theme', 'configForms']
+export const inject = ['slots', 'locale', 'remote', 'remote.account', 'remote.session', 'theme', 'configForms', 'remoteAccess']
 /** Register account UI in Desktop and plain Web clients. @param ctx - client plugin context. */
 export function apply(ctx: Context): void {
   const desktop = 'dshDesktop' in globalThis
-  ctx.effect(() => ctx.locale.register('settings.account', { en, zh }), 'account: dictionaries')
+  ctx.effect(() => ctx.locale.register('settings.account', { en, zh, ja, es, fr, de, ru, pt }), 'account: dictionaries')
   const t = ctx.locale.bind('settings.account')
   const page = globalThis as Partial<Record<typeof CONTACT_CONFIG_GLOBAL, unknown>>
   const config = ContactConfig(page[CONTACT_CONFIG_GLOBAL] ?? {})
@@ -81,10 +82,9 @@ export function apply(ctx: Context): void {
       if (!result.ok) throw new Error('account bonus acknowledgement failed')
       return result.value
     },
-    publish: (notice) => {
-      const { notice: _replaced, ...withoutNotice } = snapshot
-      // exactOptionalPropertyTypes distinguishes an absent notice from an undefined one.
-      publish(notice === null ? withoutNotice : { ...withoutNotice, notice })
+    publish: (notices) => {
+      const { notices: _replaced, ...withoutNotices } = snapshot
+      publish(notices.length === 0 ? withoutNotices : { ...withoutNotices, notices })
     },
   })
   ctx.effect(() => () => { notices.end() }, 'account: bonus notice lifetime')
@@ -120,37 +120,59 @@ export function apply(ctx: Context): void {
     return request
   }
   ctx.effect(() => () => { revision++ }, 'account: details request lifetime')
-  const stream = ctx.remote.$stream<AccountView>({
-    name: 'account', open: signal => ctx.remote.account.watch(signal), ended: () => new Error('account stream ended'),
-  })
-  let disposed = false
-  ctx.effect(() => () => { disposed = true; return stream.dispose() }, 'account: state stream')
-  void (async () => {
-    for await (const frame of stream) {
+  // The account stream, and the reads it starts, follow access to this host's account state.
+  ctx.remoteAccess.whenAccess('account/watch', function* () {
+    const stream = ctx.remote.$stream<AccountView>({
+      name: 'account', open: signal => ctx.remote.account.watch(signal), ended: () => new Error('account stream ended'),
+    })
+    // Read across closures: the disposer ends this grant while the frame loop awaits.
+    const grant = { ended: false }
+    // Withdrawing access invalidates the reads this grant started, closes the
+    // pending authorization tab, and clears the account view and the sign-in
+    // dialog state, synchronously, so the next grant starts from no account
+    // state. `notices.end()` disposes this generation's notice lifetime, which a
+    // frame of this stream begins; the notice controller stays outside and
+    // begins again under the next grant.
+    yield () => {
+      grant.ended = true
       revision++
       refreshing = undefined
       avatar.reset()
-      const initialize = frame.value.status === 'credential-stored' && frame.value.attempt?.phase === 'succeeded'
-        && snapshot.view?.attempt?.phase !== 'succeeded'
-      const { notice, ...previous } = snapshot
-      publish({ ...previous, view: frame.value, details: undefined, avatar: undefined, failed: false,
-        ...(frame.value.status === 'credential-stored' && notice ? { notice } : {}) })
-      browser.update(frame.value)
-      frame.accept()
-      if (frame.value.status === 'credential-stored') notices.begin()
-      else notices.end()
-      if (initialize) void (async () => {
-        try {
-          const initialized = await ctx.remote.session.initializeDefaultModel()
-          if (!initialized.ok) console.error('[deepseek-account] default model initialization failed', { reason: 'refused' })
-        } catch (_error) {
-          console.error('[deepseek-account] default model initialization failed', { reason: 'disconnected' })
-        }
-      })()
-      void refresh()
+      browser.dispose()
+      const { loginFailed: _loginFailed, ...current } = snapshot
+      publish({ ...current, view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false })
+      notices.end()
+      return stream.dispose()
     }
-  })().catch(() => { if (!disposed) publish({ ...snapshot, failed: true }) })
-  // A plain browser signs in on the KaifangLab sign-in page; Desktop provides its own bridge.
+    void (async () => {
+      for await (const frame of stream) {
+        // A frame the stream delivered before the revocation is not this grant's to apply.
+        if (grant.ended) return
+        revision++
+        refreshing = undefined
+        avatar.reset()
+        const initialize = frame.value.status === 'credential-stored' && frame.value.attempt?.phase === 'succeeded'
+          && snapshot.view?.attempt?.phase !== 'succeeded'
+        const { notices: previousNotices, ...previous } = snapshot
+        publish({ ...previous, view: frame.value, details: undefined, avatar: undefined, failed: false,
+          ...(frame.value.status === 'credential-stored' && previousNotices ? { notices: previousNotices } : {}) })
+        browser.update(frame.value)
+        frame.accept()
+        if (frame.value.status === 'credential-stored') notices.begin()
+        else notices.end()
+        if (initialize) void (async () => {
+          try {
+            const initialized = await ctx.remote.session.initializeDefaultModel()
+            if (!initialized.ok) console.error('[deepseek-account] default model initialization failed', { reason: 'refused' })
+          } catch (_error) {
+            console.error('[deepseek-account] default model initialization failed', { reason: 'disconnected' })
+          }
+        })()
+        void refresh()
+      }
+    })().catch(() => { if (!grant.ended) publish({ ...snapshot, failed: true }) })
+  })
+  // A plain browser signs in on the KaifangLab page; Desktop provides its own bridge.
   const webKaifang = desktop || !config.kaifangSignIn ? undefined : browserKaifang(window, config.kaifangRequestTimeoutMs)
   if (webKaifang !== undefined) {
     const handle = (event: StorageEvent): void => {
@@ -174,22 +196,22 @@ export function apply(ctx: Context): void {
   }
   const kaifang = kaifangBridge(globalThis) ?? webKaifang
   if (kaifang !== undefined) {
+    let kaifangDisposed = false
+    ctx.effect(() => () => { kaifangDisposed = true }, 'account: KaifangLab identity lifetime')
     const show = (account: KaifangAccount | null): void => {
       const { kaifang: _replaced, ...withoutKaifang } = snapshot
-      // exactOptionalPropertyTypes distinguishes an absent account from an undefined one.
       publish(account === null ? withoutKaifang : { ...withoutKaifang, kaifang: account })
     }
     let changed = false
     ctx.effect(() => kaifang.subscribe((account) => { changed = true; show(account) }), 'account: KaifangLab identity')
-    // KaifangLab profile edits (nickname, email, picture) reach the launcher at startup, on window focus, and on a fixed period.
     // Focus and visibility events arrive together; one in-flight re-read serves both.
-    let refreshing = false
+    let refreshingKaifang = false
     const refreshKaifang = (): void => {
-      if (refreshing || disposed || snapshot.kaifang === undefined || document.visibilityState === 'hidden') return
-      refreshing = true
+      if (refreshingKaifang || kaifangDisposed || snapshot.kaifang === undefined || document.visibilityState === 'hidden') return
+      refreshingKaifang = true
       kaifang.refresh()
         .catch((error: unknown) => { console.error('[kaifang-account] account refresh failed', error) })
-        .finally(() => { refreshing = false })
+        .finally(() => { refreshingKaifang = false })
     }
     ctx.effect(() => {
       const timer = setInterval(refreshKaifang, config.kaifangRefreshIntervalMs)
@@ -201,7 +223,10 @@ export function apply(ctx: Context): void {
         document.removeEventListener('visibilitychange', refreshKaifang)
       }
     }, 'account: KaifangLab profile refresh')
-    void kaifang.current().then((account) => { if (!changed && !disposed) show(account); refreshKaifang() }, (error: unknown) => {
+    void kaifang.current().then((account) => {
+      if (!changed && !kaifangDisposed) show(account)
+      refreshKaifang()
+    }, (error: unknown) => {
       console.error('[kaifang-account] account read failed', error)
     })
   }
@@ -280,7 +305,6 @@ export function apply(ctx: Context): void {
       },
     },
     async start() {
-      // Every Desktop sign-in entry opens the KaifangLab sign-in page instead of the DeepSeek Platform authorization.
       if (kaifang !== undefined) { await kaifang.signIn(); return }
       publish({ ...snapshot, loginVisible: true, loginFailed: false })
       const transport = (globalThis as typeof globalThis & {
@@ -349,17 +373,17 @@ export function apply(ctx: Context): void {
       }),
     }, DesktopOnboardingEntry))
   }
-  ctx.slots.inject('settings.models.sign-in', () => ctx.slots.register({
+  ctx.remoteAccess.whenAccess('account/watch', () => ctx.slots.inject('settings.models.sign-in', () => ctx.slots.register({
     name: 'settings.models.sign-in', locale: 'settings.account', inject: () => operations,
-  }, AccountOnboarding))
-  ctx.slots.inject('shell.quota-notice', () => ctx.slots.register({
+  }, AccountOnboarding)))
+  ctx.remoteAccess.whenAccess('account/watch', () => ctx.slots.inject('shell.quota-notice', () => ctx.slots.register({
     name: 'shell.quota-notice', locale: 'settings.account',
     select: owner => owner.code === 'ACCOUNT_QUOTA' ? owner : null,
     inject: (): AccountQuotaNoticeInjected => ({
       hooks: { account: operations.hooks.account, platformPage: platformPages },
       ...nativePlatform === undefined ? {} : { openPlatformPage: platformPageOpener(refreshAccount) },
     }),
-  }, AccountQuotaNotice))
+  }, AccountQuotaNotice)))
   if (nativePlatform !== undefined) {
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({
       name: 'shell.overlay', id: 'account.platform-page', locale: 'settings.account',
@@ -369,10 +393,10 @@ export function apply(ctx: Context): void {
       }),
     }, AccountPlatformHost))
   }
-  ctx.slots.inject('settings.launcher', () => ctx.slots.register({
+  ctx.remoteAccess.whenAccess('account/watch', () => ctx.slots.inject('settings.launcher', () => ctx.slots.register({
     name: 'settings.launcher', locale: 'settings.account', inject: () => operations,
-  }, AccountMenu))
-  ctx.slots.inject('settings.section', () => {
+  }, AccountMenu)))
+  ctx.remoteAccess.whenAccess('account/watch', () => ctx.slots.inject('settings.section', () => {
     let unregister: (() => void) | undefined
     const update = () => {
       if (snapshot.view?.status === 'credential-stored') {
@@ -388,5 +412,5 @@ export function apply(ctx: Context): void {
     listeners.add(update)
     update()
     return () => { listeners.delete(update); unregister?.() }
-  })
+  }))
 }

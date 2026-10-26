@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import KnowledgeRuntime from '@deepseek-ai/dsh-experimental-knowledge'
 import type { KnowledgeBaseId } from '@deepseek-ai/dsh-experimental-knowledge/types'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
@@ -29,6 +30,7 @@ async function fixture() {
   roots.push(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(TypertRegistry)
   await ctx.plugin(KnowledgeRuntime, KnowledgeRuntime.Config({ dataRoot, watch: false }))
   const fiber = await ctx.plugin(ToolKnowledge, ToolKnowledge.Config({}))
@@ -39,7 +41,19 @@ async function fixture() {
 
 let counter = 0
 function call(ctx: Context, args: unknown) {
-  return ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`call-${++counter}`), name: 'knowledge_search', arguments: args })
+  return ctx.tools.execute({
+    signal: new AbortController().signal,
+    calls: [{
+      type: 'tool-call',
+      id: ToolCallId(`call-${++counter}`),
+      name: 'knowledge_search',
+      arguments: JSON.stringify(args),
+    }],
+  }).then((batch) => {
+    const outcome = batch.results[0]
+    if (outcome === undefined) throw new Error('knowledge_search returned no result')
+    return outcome.result
+  })
 }
 
 function text(result: { content: readonly { type: string; text?: string }[] }): string {
