@@ -22,6 +22,7 @@ import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/s
 import css from './WorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
+const NO_WORKSPACE = '::no-workspace'
 
 /** Core flow props: the owner supplies popover control and pick semantics. */
 export interface WorkspacePickFlowProps {
@@ -39,8 +40,8 @@ export interface WorkspacePickFlowProps {
   useDirectoryFlow: SnapshotSelectorHook<boolean>
   /** Render this surface's directory-flow hole with the owner conversation (the entry's narrowed renderSlot). */
   renderDirectoryFlow: (owner: DirectoryFlowOwnerProps) => ReactNode
-  /** A real Workspace was picked or created. */
-  onPick: (workspaceId: WorkspaceId) => void
+  /** A Workspace was picked or created, or null was chosen for no Workspace. */
+  onPick: (workspaceId: WorkspaceId | null) => void
   /** Close the popover (outside click / Escape / post-pick). */
   onClose: () => void
   /** Report the picking interaction and adoption occupancy. */
@@ -49,8 +50,10 @@ export interface WorkspacePickFlowProps {
   addOnly?: boolean
   /** Menu opening direction relative to the anchor. */
   side?: 'bottom' | 'top' | 'right'
-  /** Currently active workspace (trailing check in the picker list). */
-  selectedId?: WorkspaceId | undefined
+  /** Currently active Workspace, null for a selected Session outside all Workspaces. */
+  selectedId?: WorkspaceId | null | undefined
+  /** Offer a no-Workspace choice in the conversation picker. */
+  allowUnassigned?: boolean
 }
 
 /**
@@ -72,6 +75,7 @@ export function WorkspacePickFlow({
   onBusyChange,
   side = 'bottom',
   selectedId,
+  allowUnassigned = false,
 }: WorkspacePickFlowProps) {
   const workspaceSnapshot = useWorkspaces(state => state)
   const workspaces = workspaceSnapshot.items
@@ -106,20 +110,36 @@ export function WorkspacePickFlow({
   const addEntries: MenuEntry[] = flowAvailable
     ? [{ id: ADD_WORKSPACE, label: t('menu.addWorkspace'), icon: <IconPlusOutlineRegular size={16} />, disabled: flowBusy }]
     : []
-  // With workspaces listed, the add action pins below the scroll region
-  // (divider + always visible); otherwise it IS the menu.
-  const pinAdd = !addOnly && workspaces.length > 0
-  const items: MenuEntry[] = pinAdd
+  const unassignedEntries: MenuEntry[] = allowUnassigned
+    ? [{ id: NO_WORKSPACE, label: t('menu.noWorkspace'), disabled: flowBusy }]
+    : []
+  // With workspaces listed, the no-Workspace and Add actions stay below the scrolling list.
+  const pinFooter = !addOnly && workspaces.length > 0
+  const items: MenuEntry[] = pinFooter
     ? workspaces.map(workspace => ({
       id: workspace.workspaceId,
       label: workspaceDisplayTitle(workspace.title, t('workspace.defaultName')),
       icon: <IconFolderCloseRegular size={16} />,
       disabled: flowBusy,
     }))
-    : addEntries
-  // Nothing listed and nothing to add with (a composition that mounts this
-  // package without any directory-picker): an empty popover would claim a
-  // choice that does not exist, so the anchor gesture shows nothing at all.
+    : addOnly ? addEntries : [
+      ...unassignedEntries,
+      ...(unassignedEntries.length > 0 && addEntries.length > 0
+        ? [{ type: 'separator' as const, id: 'workspace-choice-separator' }]
+        : []),
+      ...addEntries,
+    ]
+  const footer: MenuEntry[] | undefined = pinFooter
+    ? [
+      ...unassignedEntries,
+      ...(unassignedEntries.length > 0 && addEntries.length > 0
+        ? [{ type: 'separator' as const, id: 'workspace-footer-separator' }]
+        : []),
+      ...addEntries,
+    ]
+    : undefined
+  // An empty menu would claim a choice that does not exist, so the anchor
+  // gesture shows nothing when no Workspace or available action exists.
   const menuIsEmpty = items.length === 0
 
   const closeModal = (): void => {
@@ -145,16 +165,16 @@ export function WorkspacePickFlow({
     setFlowOpen(true)
   }, [onClose])
 
-  // A menu exists to disambiguate between targets. With no workspaces listed
-  // and the add action the only entry left, the anchor gesture IS that action:
-  // a one-row popover would cost a click and offer nothing to choose between.
+  // When the list is empty and there is no unassigned option, Add is the only
+  // target, so the anchor gesture opens the directory flow directly.
   // The owner's open request is consumed the same way selecting the entry
   // would consume it (close the popover, raise the flow). An empty list is
   // only final once the baseline lands — until then the menu stays up with its
   // loading status instead of jumping into a flow the arriving list would have
   // made unnecessary; the add-only surface lists nothing and never waits.
   const listSettled = addOnly || workspaceSnapshot.phase === 'ready'
-  const addIsTheOnlyEntry = !pinAdd && listSettled && addEntries.length === 1
+  const addIsTheOnlyEntry = !pinFooter && listSettled
+    && unassignedEntries.length === 0 && addEntries.length === 1
   // `flowBusy` gates this exactly as it disables the equivalent menu entry: a
   // pick still being adopted owns the surface until it settles.
   useEffect(() => {
@@ -178,6 +198,10 @@ export function WorkspacePickFlow({
   }
 
   const handleSelect = (id: string): void => {
+    if (id === NO_WORKSPACE) {
+      onPick(null)
+      return
+    }
     if (id === ADD_WORKSPACE) {
       openDirectoryFlow()
       return
@@ -191,8 +215,8 @@ export function WorkspacePickFlow({
         open={open && !addIsTheOnlyEntry && !menuIsEmpty}
         anchor={null}
         items={items}
-        {...pinAdd ? { footer: addEntries } : {}}
-        selectedId={selectedId}
+        {...footer === undefined ? {} : { footer }}
+        selectedId={selectedId === null ? NO_WORKSPACE : selectedId}
         onSelect={handleSelect}
         onClose={onClose}
         side={side}
@@ -251,6 +275,7 @@ export function WorkspacePicker({
       selectedId={selectedId}
       onPick={onPick}
       onClose={onClose}
+      allowUnassigned
     />
   )
 }

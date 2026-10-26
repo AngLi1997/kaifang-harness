@@ -222,8 +222,13 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
   containsCurrentDescendant?: boolean
   onToggle: () => void
   onCreate: () => void
-  /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  /** Workspace actions; the ungrouped bucket only exposes Clear conversations. */
+  actions?: {
+    rename?: (() => void) | undefined
+    clear?: (() => void) | undefined
+    clearDisabled?: boolean
+    delete?: (() => void) | undefined
+  } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -235,9 +240,13 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
   const active = containsCurrentDescendant || (group.expanded && group.containsCurrent)
   const [menuOpen, setMenuOpen] = useState(false)
-  const workspaceMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
-    { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
+  const workspaceMenuItems = actions === undefined ? [] : [
+    ...(actions.rename === undefined ? [] : [{ id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> }]),
+    ...(actions.clear === undefined ? [] : [{
+      id: 'clear', label: t('menu.clearConversations'), icon: <IconArchiveOutlineRegular />,
+      disabled: actions.clearDisabled ?? false,
+    }]),
+    ...(actions.delete === undefined ? [] : [{ id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true }]),
   ]
   const ownRow = (
     <div
@@ -273,12 +282,11 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
             items={workspaceMenuItems}
             onSelect={(id) => {
               setMenuOpen(false)
-              // Unknown ids leave before the dispatch: a future menu row must
-              // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
-              if (id === 'rename') actions.rename()
-              else actions.delete()
+              // Keep unknown ids from inheriting a destructive action.
+              /* v8 ignore next -- Menu can emit only the rows supplied above. */
+              if (id === 'rename') actions?.rename?.()
+              else if (id === 'clear') actions?.clear?.()
+              else if (id === 'delete') actions?.delete?.()
             }}
             portal
             closeOnPointerLeave

@@ -122,7 +122,7 @@ function sessionSnapshotOf(overrides: Partial<SessionSnapshot> = {}): SessionSna
 function mount(
   snapshot: SessionSnapshot,
   workspaceRows: WorkspaceView[] = [{ ...workspace('one'), sessionIds: [SID] }],
-  retargetWorkspace = vi.fn(async (_workspaceId: WorkspaceId) => {}),
+  retargetWorkspace = vi.fn(async (_workspaceId: WorkspaceId | null) => {}),
   options: {
     /** Explicit undefined exercises the shell before a Session is selected. */
     sessionId?: SessionId | undefined

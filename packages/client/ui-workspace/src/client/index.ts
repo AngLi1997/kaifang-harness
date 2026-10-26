@@ -280,6 +280,9 @@ export function apply(ctx: Context): void {
     requestSearch: shortcutControls.search,
     requestAddWorkspace: shortcutControls.add,
     closeAddWorkspace: shortcutControls.closeAdd,
+    archiveSessions: async (sessionIds) => {
+      for (const sessionId of sessionIds) await uiWorkspace.archiveSession(sessionId, { stopActivity: true })
+    },
     setDirectoryBusy: shortcutControls.directoryBusy,
     hooks: { directoryFlow: browserFlowSource, hostInfo, workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
   })

@@ -58,6 +58,15 @@ export interface UiWorkspace {
     options?: Pick<StartSessionOptions, 'agentPreset'>,
   ): Promise<void>
   /**
+   * Create and select a fresh Session in the Host default directory, outside every registered Workspace.
+   * @param beforeOpen - optional synchronous preparation for the selected Session; a throw
+   * aborts the open and releases the retained reference.
+   * @returns completion; a superseded request may create a Session but does not open it.
+   * @throws on failure. A refused creation is shown through the Workspace notice unless
+   * a later navigation or disposal superseded the request.
+   */
+  openUnassignedSession(beforeOpen?: (sessionId: SessionId) => void): Promise<void>
+  /**
    * Fork a Session without changing the current selection.
    * @param sessionId - source Session.
    * @param onCreated - observer before the optional child-title update.
@@ -297,6 +306,19 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     } catch (error: unknown) {
       // Reported here, not in connectWorkspace: startup restoration calls that
       // directly and stays console-only.
+      if (!navigation.aborted) this.notify({ kind: 'createFailed', message: creationFailureMessage(error) })
+      throw error
+    }
+    if (navigation.aborted) return
+    this.replaceMain(sessionId, navigation, 'reveal', beforeOpen)
+  }
+
+  async openUnassignedSession(beforeOpen?: (sessionId: SessionId) => void): Promise<void> {
+    const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+    let sessionId: SessionId
+    try {
+      sessionId = await this.sessions.create()
+    } catch (error: unknown) {
       if (!navigation.aborted) this.notify({ kind: 'createFailed', message: creationFailureMessage(error) })
       throw error
     }

@@ -114,9 +114,10 @@ function hostPathBridge(): HostPathBridge | undefined {
 interface WorkspaceNavigation {
   openSession(sessionId: SessionId): void
   openWorkspace(
-    workspaceId: Parameters<ConversationInjected['selectWorkspace']>[0],
+    workspaceId: Exclude<Parameters<ConversationInjected['selectWorkspace']>[0], null>,
     beforeOpen: (sessionId: SessionId) => void,
   ): Promise<void>
+  openUnassignedSession(beforeOpen: (sessionId: SessionId) => void): Promise<void>
 }
 
 /** Action registration used by the composer without importing its command-UI consumer. */
@@ -355,27 +356,32 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       hooks: {
         composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId),
       },
-      selectWorkspace: workspaceId => workspaceNavigation.openWorkspace(workspaceId, (nextId) => {
-        if (sessionId !== undefined && nextId !== sessionId) {
-          const from = inputHub.shell(sessionId)
-          const draft = from.draftSnapshot
-          const attachmentIds = from.snapshot.attachmentIds
-          const next = inputHub.shell(nextId)
-          if (attachmentIds.length === 0 || next.addAttachments(attachmentIds)) {
-            if (sessions.binding(nextId) === undefined) {
-              throw new Error(`ui-conversation: session "${nextId}" resolved no binding`)
-            }
-            concreteConversation(ctx).rebindDraftFiles(nextId, attachmentIds)
-            if (draft.text !== '') {
-              next.setDraft(draft)
-              from.setDraft('')
-            }
-            if (attachmentIds.length > 0) {
-              for (const id of attachmentIds) from.removeAttachment(id)
+      selectWorkspace: (workspaceId) => {
+        const beforeOpen = (nextId: SessionId): void => {
+          if (sessionId !== undefined && nextId !== sessionId) {
+            const from = inputHub.shell(sessionId)
+            const draft = from.draftSnapshot
+            const attachmentIds = from.snapshot.attachmentIds
+            const next = inputHub.shell(nextId)
+            if (attachmentIds.length === 0 || next.addAttachments(attachmentIds)) {
+              if (sessions.binding(nextId) === undefined) {
+                throw new Error(`ui-conversation: session "${nextId}" resolved no binding`)
+              }
+              concreteConversation(ctx).rebindDraftFiles(nextId, attachmentIds)
+              if (draft.text !== '') {
+                next.setDraft(draft)
+                from.setDraft('')
+              }
+              if (attachmentIds.length > 0) {
+                for (const id of attachmentIds) from.removeAttachment(id)
+              }
             }
           }
         }
-      }),
+        return workspaceId === null
+          ? workspaceNavigation.openUnassignedSession(beforeOpen)
+          : workspaceNavigation.openWorkspace(workspaceId, beforeOpen)
+      },
     }),
   }, ConversationContent)
 

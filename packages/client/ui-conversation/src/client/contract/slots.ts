@@ -403,8 +403,11 @@ export type ConvViewProps = PropsRuntime<'conversation.view'>
 
 /** Business callbacks injected into the resident Conversation shell. */
 export interface ConversationInjected {
-  /** Connect and open a blank Session in the selected Workspace. */
-  selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
+  /**
+   * Open a blank Session in a Workspace, or in the Host default directory
+   * outside all Workspaces when null; rejects on creation or draft preparation failure.
+   */
+  selectWorkspace: (workspaceId: WorkspaceId | null) => Promise<void>
   /** Session-addressed composer block source, or the stable absent source. */
   hooks: { composerBlock: ObservableSnapshot<ComposerBlock | undefined> }
 }
@@ -592,8 +595,8 @@ export type ComposerAttachmentsProps =
 export interface EmptyWorkspaceOwnerProps {
   open: boolean
   anchorRef?: RefObject<HTMLElement>
-  /** Currently selected Workspace, when available. */
-  selectedId?: WorkspaceId | undefined
-  onPick: (workspaceId: WorkspaceId) => void
+  /** Selected Workspace, null for a selected unassigned Session, or undefined before selection. */
+  selectedId?: WorkspaceId | null | undefined
+  onPick: (workspaceId: WorkspaceId | null) => void
   onClose: () => void
 }

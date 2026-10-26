@@ -92,8 +92,8 @@ export function ConversationContent(props: ConversationContentProps) {
   //   3. the blank session's workspace is in the list → its title;
   //   4. list still loading → cwd folder name bridges so the title does not
   //      flash on refresh (empty cwd → placeholder);
-  //   5. list ready but no owning workspace (deleted from the sidebar) →
-  //      placeholder, never the deleted folder's name via cwd.
+  //   5. list ready but no owning workspace → no-workspace label, never a
+  //      deleted Workspace's folder name via cwd.
   // A title still automatic reads in the reader's language, matching the
   // sidebar row the same Workspace has there.
   const storedChipTitle = pendingWorkspace?.title
@@ -104,7 +104,7 @@ export function ConversationContent(props: ConversationContentProps) {
           ? undefined
           : workspaceLabel(cwd)))
   const chipTitle = storedChipTitle === undefined
-    ? undefined
+    ? (sessionId !== undefined && workspaces.phase === 'ready' ? t('hero.noWorkspace') : undefined)
     : workspaceDisplayTitle(storedChipTitle, t('workspace.defaultName'))
 
   const heroWorkspaceRow = (
@@ -119,12 +119,13 @@ export function ConversationContent(props: ConversationContentProps) {
       {renderSlot('conversation.hero.workspace', {
         open: pickerOpen,
         anchorRef: pickerAnchor,
-        selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
+        selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId
+          ?? (sessionId !== undefined && workspaces.phase === 'ready' ? null : undefined),
         onPick: (workspaceId) => {
           setPickerOpen(false)
-          setPendingWorkspaceId(workspaceId)
+          setPendingWorkspaceId(workspaceId ?? undefined)
           void selectWorkspace(workspaceId).catch(() => {
-            setPendingWorkspaceId(current => current === workspaceId ? undefined : current)
+            if (workspaceId !== null) setPendingWorkspaceId(current => current === workspaceId ? undefined : current)
           })
         },
         onClose: () => { setPickerOpen(false) },
@@ -134,11 +135,11 @@ export function ConversationContent(props: ConversationContentProps) {
     </div>
   )
 
-  // The placeholder chip ("Choose workspace") and the Workspace-trigger input travel
-  // together: no workspace picked yet (cold start, no session at all), or a
-  // blank session whose workspace vanished (deleted from the sidebar). The
-  // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
-  // not a different tree, so the textarea DOM survives the transition.
+  // The placeholder chip ("Choose workspace") and disabled composer travel
+  // together only before a Session is selected or while the Workspace list is
+  // loading without a cwd label. A no-workspace Session is a valid selection.
+  // The bar is ONE session-maybe slot rendered unconditionally — inert is a
+  // prop, not a different tree, so the textarea DOM survives the transition.
   const inert = sessionId === undefined || (hero && chipTitle === undefined)
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins

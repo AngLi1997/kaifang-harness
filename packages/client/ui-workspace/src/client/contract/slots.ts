@@ -237,6 +237,8 @@ export type WorkspaceBrowserInjected = {
   closeAddWorkspace: () => void
   /** Publish directory interaction occupancy for command availability. */
   setDirectoryBusy: (busy: boolean) => void
+  /** Archive the supplied Sessions in order, stopping active work; rejects on the first failure and keeps earlier archives. */
+  archiveSessions: (sessionIds: readonly SessionId[]) => Promise<void>
   /**
    * Create a fresh Session, or preserve a reusable blank with explicit draft options.
    * Without an explicit Workspace, inherit the current Session Workspace,

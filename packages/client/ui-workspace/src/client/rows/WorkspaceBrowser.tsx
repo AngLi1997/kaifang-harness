@@ -289,6 +289,8 @@ type SessionTreeProps = Pick<
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
+  /** Open the browser-owned clear-confirmation dialog for a Workspace or Ungrouped group. */
+  onClearRequest: (workspaceId: WorkspaceId | undefined, title: string) => void
   /** Open the rename dialog from a row title double-click. */
   onSessionRenameRequest: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** One Session chosen from search that must be exposed and scrolled into view. */
@@ -318,7 +320,7 @@ function SessionTree({
   list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo,
-  onRenameRequest, onDeleteRequest, onSessionRenameRequest,
+  onRenameRequest, onDeleteRequest, onClearRequest, onSessionRenameRequest,
   renderSlot,
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
@@ -330,6 +332,15 @@ function SessionTree({
   const current = panelActive
     ? undefined
     : Object.values(list.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+  const hasClearableSessions = (workspaceId: WorkspaceId | undefined): boolean => {
+    const sessionIds = workspaceId === undefined
+      ? ungroupedSessionIds
+      : workspaces.find(workspace => workspace.workspaceId === workspaceId)?.sessionIds ?? []
+    return sessionIds.some((id) => {
+      const session = list.byId[id]
+      return session !== undefined && !session.blank && !rowState.archivedSessionIds.includes(id)
+    })
+  }
   const revealGroup = revealSessionId === undefined || !workspaceReady
     ? undefined
     : owningGroupKey(workspaces, revealSessionId)
@@ -571,18 +582,14 @@ function SessionTree({
             }
           }}
           drag={workspaceDragProps}
-          actions={group.workspaceId === undefined
-            ? undefined
-            : {
-              rename: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
-              },
-              delete: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
-              },
-            }}
+          actions={{
+            clear: () => onClearRequest(workspaceId, workspaceId === undefined ? t('group.ungrouped') : group.label),
+            clearDisabled: !hasClearableSessions(workspaceId),
+            ...(workspaceId === undefined ? {} : {
+              rename: () => onRenameRequest(workspaceId, group.label),
+              delete: () => onDeleteRequest(workspaceId, group.label),
+            }),
+          }}
         />
         {childRows.length > 0 && (
           <div role="group">
@@ -920,6 +927,7 @@ export function WorkspaceBrowser({
   requestSearch,
   requestAddWorkspace,
   closeAddWorkspace,
+  archiveSessions,
   setDirectoryBusy,
   renderSlot,
   t,
@@ -1263,6 +1271,35 @@ export function WorkspaceBrowser({
     })
   }
 
+  const [clearTarget, setClearTarget] = useState<{ workspaceId: WorkspaceId | undefined; title: string } | null>(null)
+  const [clearing, setClearing] = useState(false)
+  const [clearError, setClearError] = useState<string | null>(null)
+  const clearSessionIds = clearTarget === null ? [] : (
+    clearTarget.workspaceId === undefined
+      ? ungroupedMemberIds
+      : workspaces.find(workspace => workspace.workspaceId === clearTarget.workspaceId)?.sessionIds ?? []
+  ).filter((id) => {
+    const session = list.byId[id]
+    return session !== undefined && !session.blank && !archivedSessionIds.includes(id)
+  })
+  const closeClear = () => {
+    if (clearing) return
+    setClearTarget(null)
+    setClearError(null)
+  }
+  const confirmClear = () => {
+    if (clearing || clearTarget === null || clearSessionIds.length === 0) return
+    setClearing(true)
+    setClearError(null)
+    archiveSessions(clearSessionIds).then(() => {
+      setClearing(false)
+      setClearTarget(null)
+    }).catch((reason: unknown) => {
+      setClearing(false)
+      setClearError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+
   return (
     <div className={clsx(css.root, !wide && css.rail)}>
       <div className={css.sectionHeader}>
@@ -1374,6 +1411,7 @@ export function WorkspaceBrowser({
           side="right"
           onPick={(workspaceId) => {
             closeAddWorkspace()
+            if (workspaceId === null) return
             startSession(workspaceId, { clearPreviousDraft: false })
           }}
           onClose={() => { closeAddWorkspace() }}
@@ -1474,9 +1512,41 @@ export function WorkspaceBrowser({
                   setDeleteTarget({ workspaceId, title })
                   setDeleteError(null)
                 }}
+                onClearRequest={(workspaceId, title) => {
+                  setClearTarget({ workspaceId, title })
+                  setClearError(null)
+                }}
               />
             ))}
       </div>
+
+      <Modal
+        open={clearTarget !== null}
+        onClose={closeClear}
+        closeLabel={t('close')}
+        title={t('clear.title', { name: clearTarget?.title ?? '' })}
+        {...clearTarget === null ? {} : {
+          description: clearSessionIds.length === 0
+            ? t('clear.empty')
+            : t('clear.desc', { name: clearTarget.title, n: clearSessionIds.length }),
+        }}
+        footer={(
+          <>
+            <Button variant="outline" disabled={clearing} onClick={closeClear}>{t('cancel')}</Button>
+            <Button
+              variant="outline"
+              className={css.deleteAction}
+              disabled={clearing || clearSessionIds.length === 0}
+              onClick={confirmClear}
+            >
+              {t('menu.clearConversations')}
+            </Button>
+          </>
+        )}
+      >
+        {clearing && <div className={css.deleteStatus} role="status">{t('clear.pending')}</div>}
+        {clearError !== null && <div className={css.renameError} role="alert">{t('clear.error', { message: clearError })}</div>}
+      </Modal>
 
       <Modal
         open={renameTarget !== null}
