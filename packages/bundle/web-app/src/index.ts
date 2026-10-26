@@ -5,8 +5,9 @@
  * the built frontend dist (workspace knowledge of this bundle, never user
  * config), mounts the `frontend-static` fallback owner over it, registers the
  * bash-visible web runtime variable, the process-token URL line, and the
- * default-browser handoff, and provides the `webApp` service. An advertised
- * `publicUrl` replaces the published bind-address URL. Non-loopback
+ * default-browser handoff, loads project MCP servers for Archive-mode Agents,
+ * and provides the `webApp` service. An advertised `publicUrl` replaces the
+ * published bind-address URL. Non-loopback
  * HTTP binds trigger an exposure warning. App command-line values arrive
  * through the `webStartup` service expressions in the bundle patch.
  * @module @deepseek-ai/dsh-web-app
@@ -18,6 +19,8 @@ import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { auditStartupEntries } from '@deepseek-ai/dsh-app-boot'
+import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
 import { bindUrlHost, isLoopbackHost } from '@deepseek-ai/dsh-host-webserver'
@@ -26,6 +29,7 @@ import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import { parsePublicUrl } from './public-url.ts'
+import { mountArchiveMcp } from './archive-mcp.ts'
 
 /** The Web GUI this process serves, provided by the `web-runtime` row. */
 export interface WebApp {
@@ -48,8 +52,8 @@ export const name = 'web-app'
 
 const ANNOUNCED_ROOTS = new WeakSet<Context>()
 
-/** Services required before the web runtime can mount. */
-export const inject = ['webServer']
+/** Services required before the Web runtime and Archive MCP activation can mount. */
+export const inject = ['webServer', 'agentPresets']
 
 /** Plugin config: composed deployment settings plus per-invocation command-line values. */
 export interface Config {
@@ -178,8 +182,8 @@ export const internals: {
 } = { resolveDistIndex, openBrowser }
 
 /**
- * Mount the Web runtime: dist serving, the bash runtime variable, the URL
- * line, and the default-browser handoff.
+ * Mount the Web runtime and load project MCP servers for Archive-mode Agents.
+ * Each MCP client belongs to the Agent scope and is disposed with that Agent.
  * @param ctx - plugin context carrying the webServer service.
  * @param config - validated {@link Config}.
  */
@@ -204,6 +208,10 @@ export function apply(ctx: Context, config: Config): void {
   const appRootUrl = (): string => publicUrl ?? ctx.webServer.getOrigin()
   ctx.provide('webApp', { getAdvertisedUrl: appRootUrl } satisfies WebApp)
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
+  ctx.on('agent/created', async ({ agent, signal }) => {
+    if (ctx.agentPresets.composedPreset(agent.ctx) !== 'archive') return
+    await mountArchiveMcp(agent, signal)
+  })
   if (config.surfaceContext) {
     ctx.inject(['shellEnv'], (runtimeCtx) => {
       runtimeCtx.shellEnv.register({

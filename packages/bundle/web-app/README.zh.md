@@ -88,7 +88,7 @@ dsh --profile web --no-open --host "$(hostname -i | awk '{print $1}')" --public-
 
 ### 按会话的 agent 设置
 
-每个浏览器会话选择一个随发行版交付的 preset（默认 `archive`）。`archive` 沿用 `minimal` 的工具组合并加上 `skill-filesystem` 与 `tool-skill` 两行，人设为 `你是一个档案研究专员与档案数据治理专家。`，因此会列出 `~/.agents/skills` 等项目与用户 skill。项目的 [WeKnora 查询 skill](../../../.agents/skills/weknora-query/SKILL.md) 通过 WeKnora 只读 API 列出当前凭据可见的知识库，并检索明确选定的知识库。请为它使用仅有 `retrieve` 权限且限定到目标知识库的 API Key；平台级 Key 还需 tenant ID。Shell 会话会清除名称中含有 secret 的环境变量，因此请将凭据保存在仓库之外。Agent 预设设置页可更改默认项并编辑预设的子插件；保存结果持久化到 `$DSH_HOME/profiles/web/cordis.patch.yml`。只有 Host 提供可编辑的 profile 时，标准模式和 Creator 才会启用插件管理工具。
+每个浏览器会话选择一个随发行版交付的 preset（默认 `archive`）。`archive` 沿用 `minimal` 的工具组合并加上 `skill-filesystem` 与 `tool-skill` 两行，人设为 `你是一个档案研究专员与档案数据治理专家。`，因此会列出项目和用户 skill，例如 `~/.agents/skills`。archive 会话还会读取最近项目根目录中的 `.mcp.json` 及其 `mcpServers`，并为该会话启动其中的 MCP 服务；文件缺失时不添加项目 MCP 服务，配置无效会阻止会话创建。初次连接失败会记录错误并重试，会话仍可创建；连接成功前，该服务的工具不可用。stdio 命令默认从项目根目录运行；服务配置的 `cwd` 相对该根目录解析。环境变量引用支持 `${NAME}` 和 `${NAME:-fallback}`，不会经过 shell 展开。打开含 `.mcp.json` 的项目会启动其中配置的命令，因此只对可信项目使用此功能。项目的 [WeKnora 查询 skill](../../../.agents/skills/weknora-query/SKILL.md) 通过 WeKnora 只读 API 列出当前凭据可见的知识库，并检索明确选定的知识库。请为它使用仅有 `retrieve` 权限且限定到目标知识库的 API Key；平台级 Key 还需 tenant ID。Shell 会话会清除名称中含有 secret 的环境变量，因此请将凭据保存在仓库之外。Agent 预设设置页可更改默认项并编辑预设的子插件；保存结果持久化到 `$DSH_HOME/profiles/web/cordis.patch.yml`。只有 Host 提供可编辑的 profile 时，标准模式和 Creator 才会启用插件管理工具。
 
 -----
 

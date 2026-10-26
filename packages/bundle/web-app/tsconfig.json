@@ -27,10 +27,19 @@
       "path": "../../client/connection/tsconfig.host.json"
     },
     {
+      "path": "../../core/agent"
+    },
+    {
       "path": "../../host/frontend-static"
     },
     {
       "path": "../../host/webserver"
+    },
+    {
+      "path": "../../mcp/mcp-client"
+    },
+    {
+      "path": "../../preset/agent-preset-registry"
     },
     {
       "path": "../../util/launch-environment"
