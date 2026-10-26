@@ -57,7 +57,7 @@ dsh --profile web --no-open --port 8080
 | `surfaceContext` | `true` | 把 `DSH_WEB_URL` 暴露给 agent 的 shell 命令 |
 | `publicUrl` | 未设置 | 对外公告的 HTTP(S) 应用根；否则公告绑定地址 URL |
 
-生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-web-app)列出了本运行时插件接受的字段及其 JSDoc。随发行版交付的组合插入 `schedule` 服务行与 `ui-schedule` 任务页面行，时钟读数与四个提醒工具则属于 `standard`、`archive`、`cordis` 与 `ptc` 四个 preset。这四个 preset 的 `tool-subagent` 与 `tool-subagent-fork` 两行都 deny 这四个工具，因此被委派子 agent 的作用域不会列出它们。
+生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-web-app)列出了本运行时插件接受的字段及其 JSDoc。随发行版交付的组合插入 `schedule` 服务行与 `ui-schedule` 任务页面行，时钟读数与四个提醒工具则属于 `standard`、`cordis` 与 `ptc` 三个 preset。这三个 preset 的 `tool-subagent` 与 `tool-subagent-fork` 两行都 deny 这四个工具，因此被委派子 agent 的作用域不会列出它们。
 
 <a id="public-deployments"></a>
 ### 监听、信任与公开部署
@@ -88,7 +88,7 @@ dsh --profile web --no-open --host "$(hostname -i | awk '{print $1}')" --public-
 
 ### 按会话的 agent 设置
 
-每个浏览器会话选择一个随发行版交付的 preset（默认 `archive`）。`archive` 沿用 `standard` 的工具组合，人设为 `你是一个档案研究专员与档案数据治理专家。`。Agent 预设设置页可更改默认项并编辑预设的子插件；保存结果持久化到 `$DSH_HOME/profiles/web/cordis.patch.yml`。只有 Host 提供可编辑的 profile 时，Creator 的插件管理工具才会启用。
+每个浏览器会话选择一个随发行版交付的 preset（默认 `archive`）。`archive` 沿用 `minimal` 的工具组合并加上 `skill-filesystem` 与 `tool-skill` 两行，人设为 `你是一个档案研究专员与档案数据治理专家。`，因此会列出 `~/.agents/skills` 等项目与用户 skill。项目的 [WeKnora 查询 skill](../../../.agents/skills/weknora-query/SKILL.md) 通过 WeKnora 只读 API 列出当前凭据可见的知识库，并检索明确选定的知识库。请为它使用仅有 `retrieve` 权限且限定到目标知识库的 API Key；平台级 Key 还需 tenant ID。Shell 会话会清除名称中含有 secret 的环境变量，因此请将凭据保存在仓库之外。Agent 预设设置页可更改默认项并编辑预设的子插件；保存结果持久化到 `$DSH_HOME/profiles/web/cordis.patch.yml`。只有 Host 提供可编辑的 profile 时，Creator 的插件管理工具才会启用。
 
 -----
 

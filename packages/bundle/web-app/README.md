@@ -57,7 +57,7 @@ The `minimal` agent preset uses a persistent shell, the `read_image` tool, and a
 | `surfaceContext` | `true` | Expose `DSH_WEB_URL` to the agent's shell commands |
 | `publicUrl` | Unset | Advertised HTTP(S) application root; otherwise announce the bind-address URL |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) lists this runtime plugin's accepted fields and their JSDoc. The shipped composition inserts the `schedule` service row and the `ui-schedule` task page row, while the clock reading and the four reminder tools belong to the `standard`, `archive`, `cordis`, and `ptc` presets. The `tool-subagent` and `tool-subagent-fork` rows in those presets deny the four tools, so a delegated child's scope never lists them.
+The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) lists this runtime plugin's accepted fields and their JSDoc. The shipped composition inserts the `schedule` service row and the `ui-schedule` task page row, while the clock reading and the four reminder tools belong to the `standard`, `cordis`, and `ptc` presets. The `tool-subagent` and `tool-subagent-fork` rows in those presets deny the four tools, so a delegated child's scope never lists them.
 
 <a id="public-deployments"></a>
 ### Listening, trust, and public deployments
@@ -88,7 +88,7 @@ When you launch `dsh --profile web` over SSH, the URL line still prints but the 
 
 ### Per-session agent setup
 
-Each browser session selects a shipped preset (`archive` by default). `archive` carries the `standard` tool roster under the persona `你是一个档案研究专员与档案数据治理专家。`. The Agent presets settings page changes the default and edits preset child plugins; saves persist in `$DSH_HOME/profiles/web/cordis.patch.yml`. Creator's plugin-management tool is enabled only when the Host provides an editable profile.
+Each browser session selects a shipped preset (`archive` by default). `archive` carries the `minimal` tool roster plus the `skill-filesystem` and `tool-skill` rows under the persona `你是一个档案研究专员与档案数据治理专家。`, so it lists project and user skills such as `~/.agents/skills`. The project [WeKnora query skill](../../../.agents/skills/weknora-query/SKILL.md) lists visible knowledge bases and searches explicitly selected ones through WeKnora's read-only API. Give it an API key limited to the `retrieve` capability and intended knowledge bases; platform-scoped keys also need a tenant ID. Store credentials outside the repository because shell sessions scrub secret-named environment variables. The Agent presets settings page changes the default and edits preset child plugins; saves persist in `$DSH_HOME/profiles/web/cordis.patch.yml`. Creator's plugin-management tool is enabled only when the Host provides an editable profile.
 
 -----
 
