@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
+import { KAIFANG_MODEL_PROVIDER_PREFIX } from './provider-id.ts'
 
 /** Authenticated Meta identity attached to a shared Host Peer. */
 export interface KaifangUserPrincipal {
@@ -13,13 +14,18 @@ export interface KaifangUserPrincipal {
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface PrincipalMap {
-    kaifangUser: KaifangUserPrincipal
+    'kaifang-user': KaifangUserPrincipal
   }
 }
 
-/** Stable opaque namespace for one Meta identity within a tenant. */
+/** 为租户内的 Meta 身份生成稳定的不透明分区标识。 */
 export function platformUserKey(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): string {
   return createHash('sha256').update(`${identity.tid}\0${identity.sub}`).digest('hex').slice(0, 24)
+}
+
+/** 为单个 Meta 身份生成稳定模型路由；provider id 不包含用户和租户标识。 */
+export function platformModelProviderId(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): string {
+  return `${KAIFANG_MODEL_PROVIDER_PREFIX}${platformUserKey(identity)}`
 }
 
 /** Narrow a Remote invocation principal to the platform-user identity. */

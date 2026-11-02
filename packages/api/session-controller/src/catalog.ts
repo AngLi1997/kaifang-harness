@@ -20,8 +20,9 @@ import type {
 export async function buildModelCatalog(
   ctx: Context,
   defaultSelection: ModelSelection = ctx.agentDefaultModel.currentSelection(),
+  includeProvider: (provider: string) => boolean = () => true,
 ): Promise<ModelCatalog> {
-  const providers = ctx.llm.listProviders()
+  const providers = ctx.llm.listProviders().filter(provider => includeProvider(provider.id))
   const catalog = await Promise.all(providers.map(async (provider) => {
     try {
       const models = await ctx.llm.listModels(provider.id)

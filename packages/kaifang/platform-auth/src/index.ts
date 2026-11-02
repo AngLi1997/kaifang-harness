@@ -15,8 +15,9 @@ import type {} from '@deepseek-ai/dsh-workspace'
 import type {} from '@deepseek-ai/dsh-session'
 import z from '@deepseek-ai/schemastery'
 import type { KaifangUserPrincipal } from './identity.ts'
-import { platformUserKey } from './identity.ts'
-export { isKaifangUserPrincipal, platformUserKey } from './identity.ts'
+import { platformModelProviderId, platformUserKey } from './identity.ts'
+import { registerPlatformModelProvider } from './model-provider.ts'
+export { isKaifangUserPrincipal, platformModelProviderId, platformUserKey } from './identity.ts'
 export type { KaifangUserPrincipal } from './identity.ts'
 
 const AUTH_PATH = '/kaifang/auth'
@@ -59,6 +60,7 @@ const GLOBAL_ROLE = {
     'workspace/create', 'workspace/initializeDefault', 'workspace/follow',
     'session/create', 'session/list', 'session/search', 'session/control', 'session/modelCatalog',
     'session/initializeDefaultModel', 'settings/describe', 'credentials/describe',
+    'llm/listProviders', 'llm/listConfigurableProviders',
     'directoryPicker/list', 'directoryPicker/createDirectory',
   ],
 } satisfies RemoteAccessRole<'global'>
@@ -77,6 +79,8 @@ export interface PlatformAuthHandle {
   accessToken(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): string | undefined
   /** @param identity - authenticated user and tenant. @returns that user's profile, or null. */
   current(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): PlatformUser | null
+  /** 按当前用户和租户注册模型路由，并返回不透明 provider id。 */
+  ensureModelProvider(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): string
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -112,7 +116,7 @@ interface ResolvedPlatformAuthConfig {
 }
 
 export const name = 'kaifang-platform-auth'
-export const inject = ['credentials']
+export const inject = ['credentials', 'llm']
 export const Config: z<PlatformAuthConfig> = z.object({
   issuer: z.string().default(''),
   clientId: z.string().default('kaifang-harness'),
@@ -296,8 +300,8 @@ class PlatformSession {
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly refreshInFlight = new Map<string, Promise<StoredSession | undefined>>()
   private readonly attempts = new Map<string, Attempt>()
-  private sessionEnded: ((sessionId: string) => void) | undefined
-  readonly handle: PlatformAuthHandle = {
+  private sessionEnded: ((sessionId: string, identity?: Pick<KaifangUserPrincipal, 'sub' | 'tid'>) => void) | undefined
+  readonly handle: Pick<PlatformAuthHandle, 'accessToken' | 'current'> = {
     accessToken: identity => this.findByIdentity(identity)?.accessToken,
     current: identity => this.findByIdentity(identity)?.user ?? null,
   }
@@ -305,7 +309,7 @@ class PlatformSession {
   constructor(private readonly credentials: CredentialProvider, private readonly config: ResolvedPlatformAuthConfig) {}
 
   /** Dispose live Peer connections as soon as a refresh proves the IAM session is no longer valid. */
-  onSessionEnded(handler: (sessionId: string) => void): void {
+  onSessionEnded(handler: (sessionId: string, identity?: Pick<KaifangUserPrincipal, 'sub' | 'tid'>) => void): void {
     this.sessionEnded = handler
   }
 
@@ -407,6 +411,7 @@ class PlatformSession {
 
   async logout(sessionId: string | undefined): Promise<void> {
     if (sessionId === undefined) return
+    const session = this.sessions.get(sessionId)
     this.cancelAttempts(sessionId)
     this.sessions.delete(sessionId)
     const timer = this.timers.get(sessionId)
@@ -415,6 +420,7 @@ class PlatformSession {
     await this.refreshInFlight.get(sessionId)
     await this.credentials.deleteRecord(sessionKey(sessionId))
     await this.writeSessionIndex(ids => ids.filter(id => id !== sessionId))
+    if (session !== undefined) this.sessionEnded?.(sessionId, { sub: session.sub, tid: session.tid })
   }
 
   dispose(): void {
@@ -432,6 +438,11 @@ class PlatformSession {
   private findByIdentity(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): StoredSession | undefined {
     return [...this.sessions.values()].find(session => session.sub === identity.sub
       && session.tid === identity.tid && session.expiresAt > Date.now())
+  }
+
+  accessTokenForProvider(provider: string): string | undefined {
+    return [...this.sessions.values()].find(session => platformModelProviderId(session) === provider
+      && session.expiresAt > Date.now())?.accessToken
   }
 
   private async refreshSession(sessionId: string): Promise<StoredSession | undefined> {
@@ -456,7 +467,7 @@ class PlatformSession {
         const timer = this.timers.get(sessionId)
         if (timer !== undefined) clearTimeout(timer)
         this.timers.delete(sessionId)
-        this.sessionEnded?.(sessionId)
+        this.sessionEnded?.(sessionId, { sub: current.sub, tid: current.tid })
         await this.credentials.deleteRecord(sessionKey(sessionId))
         await this.writeSessionIndex(ids => ids.filter(id => id !== sessionId))
         console.warn('[kaifang-platform-auth] platform session refresh failed; sign-in is required', error)
@@ -625,9 +636,10 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
   if (enabled) validateUrls(resolved)
   const auth = new PlatformSession(ctx.credentials, resolved)
   if (enabled) await auth.initialize()
-  ctx.provide('kaifangPlatformAuth', auth.handle)
+  const modelProviders = registerPlatformModelProvider(ctx, resolved.issuer, provider => auth.accessTokenForProvider(provider))
+  ctx.provide('kaifangPlatformAuth', { ...auth.handle, ensureModelProvider: modelProviders.ensure })
   ctx.inject(['remoteAccess', 'workspaceRegistry'], (accessCtx) => {
-    const unregister = accessCtx.remoteAccess.registerPolicy('kaifangUser', {
+    const unregister = accessCtx.remoteAccess.registerPolicy('kaifang-user', {
       bindings: (principal) => {
         const ownerId = platformUserKey(principal)
         const prefix = `user-${ownerId}-session-`
@@ -653,7 +665,8 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
       throw new Error('kaifang-platform-auth: Web Host Connection does not support identity-aware Peer admission')
     }
     const peers = new Map<string, PeerScope>()
-    auth.onSessionEnded((sessionId) => {
+    auth.onSessionEnded((sessionId, identity) => {
+      if (identity !== undefined && auth.handle.accessToken(identity) === undefined) modelProviders.release(identity)
       const peer = peers.get(sessionId)
       if (peer === undefined) return
       peers.delete(sessionId)

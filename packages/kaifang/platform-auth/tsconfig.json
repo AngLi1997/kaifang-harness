@@ -5,10 +5,13 @@
     "outDir": "lib/types"
   },
   "include": ["src"],
+  "exclude": ["src/client"],
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../credentials/credentials" },
+    { "path": "../../attachment/attachment" },
+    { "path": "../../llm/llm" },
     { "path": "../../host/webserver" },
     { "path": "../../api/remote-access/tsconfig.host.json" },
     { "path": "../../typert/protocol" },

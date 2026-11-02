@@ -43,13 +43,13 @@ Host 创建 state 与 PKCE verifier，将浏览器转到 IAM；回调时由 Host
 
 Admission Provider 位于 Connection admission 内，因此 `/api` 请求和 Gateway WebSocket 升级会按登录 Cookie 选择对应的 `kaifang-user` Peer。登录、回调、状态、取消和退出路由使用 Connection 的 Host/Origin 信任检查，但在平台登录前保持可访问。
 
-Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录、只读设置描述和用户根目录内的目录浏览。会话与工作区变更仍需匹配用户绑定；工作区创建、默认目录初始化和 Session 创建会在 Host 代码中再次限制到本人目录。
+Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录、只读模型提供方目录、只读设置描述和用户根目录内的目录浏览。会话与工作区变更仍需匹配用户绑定；工作区创建、默认目录初始化和 Session 创建会在 Host 代码中再次限制到本人目录。
 
 Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `sub` 与 `tid`，才能读取该用户的身份或访问令牌。访问令牌过期或退出后，该接口不再返回令牌。
 
 ## 模型体验
 
-本包自身不发起模型调用。它认证 Host 并限制 DSH API；Host 侧的平台模型提供方需另行消费访问令牌。本包不修改提示词、模型请求或 KV 缓存。
+登录后，Host 为当前租户和用户注册独立模型路由，通过 KaifangMeta 获取已启用的对话与视觉模型；新会话默认选第一个可用模型，模型请求再经 Meta 后端代理。设置 → 模型会通过当前 Peer 的 Session 模型目录展示该账号获准使用的模型，并支持手动刷新。模型密钥不会进入浏览器，Meta 会在每次调用时重新检查模型权限。
 
 #### KV Cache effect
 
@@ -60,4 +60,4 @@ Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `
 - **一个共享 Host 服务多位用户**：无需配置 `expectedSub`；IAM 只登记一次固定回调。会话 ID 按身份加前缀，工作区持久化归属并放在每用户目录下。
 - **会话时长由 IAM 刷新策略控制**：账号停用或刷新会话吊销后，Host 会在下次续期时清除准入。
 - **工作区目录不等同于操作系统沙箱**：终端或文件工具若能执行任意主机命令，部署方仍须为用户 Agent 配置 OS 容器/沙箱。
-- **平台模型 Provider 尚未完成**：插件按 Peer 暴露令牌读取接口，但模型调用还需接入该接口。
+- **模型目录每 10 秒刷新一次**：模型被撤权或停用后可能短暂显示；下一次调用会由 Meta 拒绝。

@@ -26,7 +26,7 @@ Every Kaifang-specific built-in plugin lives in this group, one package per dire
 | Package | Role | ctx key |
 |---|---|---|
 | [client-ui-archive-tools](client-ui-archive-tools/README.md) | Archive tool catalog in the sidebar, click-to-reference, and the `@` picker | — |
-| [platform-auth](platform-auth/README.md) | Shared multi-user IAM sign-in, Peer admission, and session/workspace access | `ctx.kaifangPlatformAuth` |
+| [platform-auth](platform-auth/README.md) | Shared multi-user IAM sign-in, Peer admission, session/workspace access, and the account-scoped Models settings catalog | `ctx.kaifangPlatformAuth` |
 
 -----
 

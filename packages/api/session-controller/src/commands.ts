@@ -24,6 +24,7 @@ import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { RemoteError, principalOf, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
 import { isKaifangUserPrincipal, platformUserKey } from '@deepseek-ai/dsh-kaifang-platform-auth'
+import type { KaifangUserPrincipal } from '@deepseek-ai/dsh-kaifang-platform-auth'
 import { WorkspaceId, type Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   ApiSessionAgentController,
@@ -109,6 +110,12 @@ export class SessionCommandController {
     }
     const platformUser = isKaifangUserPrincipal(principal) ? principal : undefined
     const ownerId = platformUser === undefined ? undefined : platformUserKey(platformUser)
+    const platformModel = platformUser === undefined ? undefined : await this.platformModel(platformUser)
+    if (platformUser !== undefined && platformModel === undefined) {
+      throw new RemoteError('session/provider-models-unavailable', 'KaifangMeta 暂无已授权的对话模型', {
+        provider: this.ctx.kaifangPlatformAuth.ensureModelProvider(platformUser),
+      })
+    }
     const sessionPrefix = ownerId === undefined ? undefined : `user-${ownerId}-session-`
     let workspace: Workspace | undefined
     if (request.workspaceId !== undefined) {
@@ -153,6 +160,7 @@ export class SessionCommandController {
     } catch (error) {
       this.rejectCreation(error)
     }
+    if (platformModel !== undefined) created.agent.model.select(platformModel)
     const sessionId = created.agent.id
     if (workspace !== undefined) {
       try {
@@ -242,6 +250,12 @@ export class SessionCommandController {
    */
   async fork(request: SessionForkRequest, principal?: Principal): Promise<SessionForkValue> {
     const ownerId = isKaifangUserPrincipal(principal) ? platformUserKey(principal) : undefined
+    const platformModel = isKaifangUserPrincipal(principal) ? await this.platformModel(principal) : undefined
+    if (isKaifangUserPrincipal(principal) && platformModel === undefined) {
+      throw new RemoteError('session/provider-models-unavailable', 'KaifangMeta 暂无已授权的对话模型', {
+        provider: this.ctx.kaifangPlatformAuth.ensureModelProvider(principal),
+      })
+    }
     const sessionPrefix = ownerId === undefined ? undefined : `user-${ownerId}-session-`
     if (sessionPrefix !== undefined && !String(request.sessionId).startsWith(sessionPrefix)) {
       throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, { sessionId: request.sessionId })
@@ -293,7 +307,7 @@ export class SessionCommandController {
     const childId = brandString<SessionId>(`${sessionPrefix ?? 'session-'}${randomUUID()}`)
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
     try {
-      const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
+      const { provider, model } = platformModel ?? this.ctx.agentDefaultModel.currentSelection()
       await this.ctx.agents.create({
         sessionId: childId,
         seed,
@@ -337,9 +351,19 @@ export class SessionCommandController {
    * @param source - the `user-rpc` source recorded on the accepted message.
    * @returns acknowledgement that the Agent accepted the prompt.
    */
-  async prompt(request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
+  async prompt(request: SessionPromptRequest, source: MessageSource, principal?: Principal): Promise<SessionPromptValue> {
     const agent = await this.resolveAgent(request.sessionId)
     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+    if (isKaifangUserPrincipal(principal)) {
+      const selection = await this.platformModel(principal)
+      if (selection === undefined) throw new RemoteError('session/provider-models-unavailable', 'KaifangMeta 暂无已授权的对话模型', {
+        provider: this.ctx.kaifangPlatformAuth.ensureModelProvider(principal),
+      })
+      const current = agent.model.current()
+      const available = current?.provider === selection.provider
+        && (await this.ctx.llm.listModels(selection.provider)).some(model => model.id === current.model)
+      if (!available) agent.model.select(selection)
+    }
     const admission = resolvePromptFileReceipts(
       request.content,
       receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
@@ -391,6 +415,14 @@ export class SessionCommandController {
       throw new RemoteError('session/model-unavailable', 'Select an available model before sending a message.',
         { provider: selection.provider, model: selection.model })
     }
+  }
+
+  private async platformModel(
+    identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>,
+  ): Promise<Pick<AgentModelSelection, 'provider' | 'model'> | undefined> {
+    const provider = this.ctx.kaifangPlatformAuth.ensureModelProvider(identity)
+    const model = (await this.ctx.llm.listModels(provider))[0]
+    return model === undefined ? undefined : { provider, model: model.id }
   }
 
   /**

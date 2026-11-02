@@ -139,6 +139,7 @@ export class SessionController extends TypertRemoteService {
     'attachments',
     'fileUploads',
     'fs',
+    'kaifangPlatformAuth',
     'llm',
     'remoteAccess',
     'sessions',
@@ -300,6 +301,13 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('selectModel')
   selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
+    const principal = principalOf(this.ctx.invocation)
+    if (isKaifangUserPrincipal(principal)
+      && request.provider !== this.ctx.kaifangPlatformAuth.ensureModelProvider(principal)) {
+      throw new RemoteError('session/model-unavailable', '只能选择当前账号有权限的平台模型', {
+        provider: request.provider, model: request.model,
+      })
+    }
     return this.commands.selectModel(request)
   }
 
@@ -327,8 +335,13 @@ export class SessionController extends TypertRemoteService {
    * @returns provider-grouped models, the deployment default, and isolated provider failures.
    */
   @Remote('modelCatalog')
-  modelCatalog(): Promise<ModelCatalog> {
-    return buildModelCatalog(this.ctx)
+  async modelCatalog(): Promise<ModelCatalog> {
+    const principal = principalOf(this.ctx.invocation)
+    if (!isKaifangUserPrincipal(principal)) return buildModelCatalog(this.ctx)
+    const provider = this.ctx.kaifangPlatformAuth.ensureModelProvider(principal)
+    const model = (await this.ctx.llm.listModels(provider))[0]
+    const selection = model === undefined ? { provider, model: 'unavailable' } : { provider, model: model.id }
+    return buildModelCatalog(this.ctx, selection, candidate => candidate === provider)
   }
 
   /**
@@ -474,7 +487,7 @@ export class SessionController extends TypertRemoteService {
       ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
       ...(principal === undefined ? {} : { principal }),
     }
-    return this.commands.prompt(request, source)
+    return this.commands.prompt(request, source, principal)
   }
 
   /**

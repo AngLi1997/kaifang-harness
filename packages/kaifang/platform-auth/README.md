@@ -43,13 +43,13 @@ The Host creates state and a PKCE verifier, redirects the browser to IAM, exchan
 
 The admission provider runs inside Connection admission, so it selects the correct `kaifang-user` Peer for both `/api` requests and Gateway WebSocket upgrades. The login, callback, status, cancel, and logout routes use Connection's Host/Origin trust fence but remain reachable before platform sign-in.
 
-The `global` Remote access resource allows only startup, list/search, model-catalog, read-only settings descriptions, and directory browsing under the signed-in user's root. Session and workspace mutations still require user-bound resources; workspace creation, default initialization, and Session creation are confined again in Host code.
+The `global` Remote access resource allows only startup, list/search, model-catalog, read-only model-provider directories, read-only settings descriptions, and directory browsing under the signed-in user's root. Session and workspace mutations still require user-bound resources; workspace creation, default initialization, and Session creation are confined again in Host code.
 
 The Host provides `ctx.kaifangPlatformAuth`; Host integrations pass the current Peer's `sub` and `tid` to read that user's identity or access token. It returns no token after expiry or sign-out.
 
 ## Model Experience
 
-None by itself. This package authenticates the Host and gates the DSH API; a Host-side platform model provider consumes the token separately. It adds no prompt, model request, or KV-cache behavior.
+After sign-in, the Host registers a model route for the current tenant and user. It lists enabled chat and vision models through KaifangMeta, defaults new Sessions to the first available model, and sends model requests back through Meta's server-side proxy. Settings → Models shows the models returned by the current Peer's Session catalog and provides a manual refresh. Provider keys never enter the browser. Model permission is checked again by Meta for every request.
 
 #### KV Cache effect
 
@@ -60,4 +60,4 @@ None.
 - **One shared Host serves multiple users** — there is no `expectedSub`; IAM registers one exact callback. Session IDs are namespaced and workspaces persist their user ownership.
 - **Session lifetime follows IAM refresh policy** — disabling the account or revoking the refresh session clears Host admission on the next renewal.
 - **Workspace paths are not an OS sandbox** — terminal or file tools that can execute arbitrary host commands still require per-user OS containers/sandboxing.
-- **Platform model provider is not connected yet** — the plugin exposes per-Peer token lookup, but model calls still need to consume it.
+- **Model catalog refreshes every 10 seconds** — a revoked or disabled model can remain visible briefly; Meta rejects its next invocation.
