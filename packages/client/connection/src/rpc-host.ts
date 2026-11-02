@@ -28,6 +28,8 @@ import type {
   ConnectionRpcHandler,
   ConnectionRpcResult,
   ConnectionRequestRejection,
+  ConnectionAdmissionGuard,
+  ConnectionAdmissionProvider,
   ConnectionTrustRequest,
   HostConnectionHandle,
   HostConnectionRpc,
@@ -75,6 +77,8 @@ export class HostConnectionService extends Service implements HostConnectionHand
   private disposed = false
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+  private readonly admissionGuards = new Set<ConnectionAdmissionGuard>()
+  private readonly admissionProviders = new Set<ConnectionAdmissionProvider>()
 
   readonly allowsRemoteAuthorities: boolean
 
@@ -125,10 +129,38 @@ export class HostConnectionService extends Service implements HostConnectionHand
     return 'rejection' in admission ? admission.rejection : undefined
   }
 
+  /** Apply only the base Host/Origin fence for routes that must work before identity sign-in. */
+  trustRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
+    return this.isTrusted(request) ? undefined : 403
+  }
+
+  /** Add an identity gate that also covers the Gateway's WebSocket upgrade path. */
+  registerAdmissionGuard(guard: ConnectionAdmissionGuard): () => void {
+    this.admissionGuards.add(guard)
+    return () => { this.admissionGuards.delete(guard) }
+  }
+
+  /** Select an identity-specific Peer before the process-wide browser/API credentials. */
+  registerAdmissionProvider(provider: ConnectionAdmissionProvider): () => void {
+    this.admissionProviders.add(provider)
+    return () => { this.admissionProviders.delete(provider) }
+  }
+
   /** Browser requests share an owner Peer; API HTTP does not depend on an attached socket. */
   admit(request: ConnectionTrustRequest): PeerAdmission {
     if (!this.isTrusted(request)) return { rejection: 403 }
     if (this.disposed) return { rejection: 401 }
+    let provided: PeerAdmission | undefined
+    for (const provider of this.admissionProviders) {
+      provided = provider(request)
+      if (provided !== undefined) break
+    }
+    if (provided !== undefined && 'rejection' in provided) return provided
+    for (const guard of this.admissionGuards) {
+      const rejection = guard(request)
+      if (rejection !== undefined) return { rejection }
+    }
+    if (provided !== undefined) return provided
     const secure = this.owner.get('webServer')?.protocol === 'https:'
     if (this.browserAuth.isAuthenticated(request, secure)) return { peer: this.browserPeer }
     const id = this.browserAuth.authenticateApi(request, secure)

@@ -24,6 +24,8 @@ const sessionId = z.string().transform(value => brandString<SessionId>(value))
 export const workspaceRecord = z.object({
   path: z.string(),
   title: z.string(),
+  /** Opaque platform-user partition; absent records belong to the local Host owner. */
+  ownerId: z.string().optional(),
   sessionIds: z.array(sessionId),
   createdAt: z.string(),
   updatedAt: z.string(),

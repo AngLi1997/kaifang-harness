@@ -39,7 +39,7 @@ declare module '@deepseek-ai/cordis' {
  * serve is refused rather than approximated.
  */
 export class DirectoryPickerController extends TypertRemoteService {
-  static inject = ['directoryPicker']
+  static inject = ['directoryPicker', 'workspaceController']
 
   /** @param ctx - Host context carrying the composed directory-picking backend. */
   constructor(ctx: Context) {
@@ -53,6 +53,13 @@ export class DirectoryPickerController extends TypertRemoteService {
    */
   @Remote('pick')
   async pick(signal: AbortSignal): Promise<string | null> {
+    if (this.ctx.workspaceController.isPlatformUserInvocation()) {
+      throw new RemoteError(
+        'directory-picker/unavailable',
+        'shared Web users must choose directories inside their own workspace root',
+        { capability: 'browse' },
+      )
+    }
     const capability = this.requireCapability('native', 'pick')
     try {
       return await capability.pick(signal)
@@ -72,7 +79,7 @@ export class DirectoryPickerController extends TypertRemoteService {
   async list(path: string | undefined, signal: AbortSignal): Promise<DirectoryListing> {
     const capability = this.requireCapability('browse', 'list')
     try {
-      return await capability.list(path, signal)
+      return await capability.list(await this.ctx.workspaceController.directoryPickerPath(path), signal)
     } catch (error: unknown) {
       throw cancellableFailure(error, signal, 'directory listing was aborted')
     }
@@ -96,7 +103,9 @@ export class DirectoryPickerController extends TypertRemoteService {
     }
     const capability = this.requireCapability('browse', 'createDirectory')
     try {
-      return await capability.createDirectory(request.data.path, request.data.name)
+      const path = await this.ctx.workspaceController.directoryPickerPath(request.data.path)
+      if (path === undefined) throw new Error('directory picker path is unavailable')
+      return await capability.createDirectory(path, request.data.name)
     } catch (error: unknown) {
       throw browseFailure(error)
     }

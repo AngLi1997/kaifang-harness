@@ -114,6 +114,9 @@
     },
     {
       "path": "../../session/working-directory"
+    },
+    {
+      "path": "../../kaifang/platform-auth"
     }
   ]
 }

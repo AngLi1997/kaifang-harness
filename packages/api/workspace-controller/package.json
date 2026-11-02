@@ -72,6 +72,7 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-deque": "workspace:*",
+    "@deepseek-ai/dsh-kaifang-platform-auth": "workspace:*",
     "@deepseek-ai/dsh-native-command": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~",
     "zod": "4.4.3"

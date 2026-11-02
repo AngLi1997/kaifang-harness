@@ -52,6 +52,8 @@ Only API callers use `GET /connect?token=...&interactions=answer|none`: it immed
 
 Authenticated shared HTTP requests pass through the `connection/request` waterfall before body transfer. A listener may refuse new requests or await `next()` through response completion; removing its owning fiber removes admission behavior. Desktop uses this hook to lock new API work during an approved installation without canceling already-admitted work. Client disconnection aborts the handler signal; the bridge stops socket writes and drains any remaining response chunks. WebSocket stream ownership remains with API Gateway.
 
+Host identity integrations may register `connection.registerAdmissionProvider()` to select an identity Peer or reject an unauthenticated request after the Host/Origin fence for both HTTP RPC and Gateway WebSocket upgrades. Every `registerAdmissionGuard()` still runs after a provider admits; requests no provider handles fall back to the built-in browser-cookie/API-peer admission. Routes that must work before sign-in use `connection.trustRejection()` for the Host/Origin fence alone, then apply their own state and CSRF checks.
+
 <a id="connection-generation"></a>
 ## Connection generation
 

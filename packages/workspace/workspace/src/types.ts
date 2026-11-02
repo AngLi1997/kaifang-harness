@@ -70,6 +70,9 @@ export interface Workspace {
   /** Stable record id (generated uuid). */
   readonly id: WorkspaceId
 
+  /** Opaque platform-user partition; absent for a Workspace owned by the local Host account. */
+  readonly ownerId: string | undefined
+
   /**
    * Canonical directory path: the `fs.realpath` of the path given at create
    * time (trailing slashes, `..`, and symlinks all resolved). Never rewritten

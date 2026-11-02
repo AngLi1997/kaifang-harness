@@ -52,6 +52,8 @@ HTTPS cookie 名称与签名 audience 包含 `https:` scheme，因此即使 host
 
 通过认证的共享 HTTP 请求在传输请求体之前经过 `connection/request` waterfall。监听器可以拒绝新请求，或等待 `next()` 直到响应完成；释放所属 fiber 会移除准入行为。Desktop 使用此扩展点，在已批准的安装期间锁住新的 API 工作，而不取消已接纳的工作。客户端断开会中止处理函数的信号；桥接器停止写入 socket，并排空剩余响应块。WebSocket 流仍由 API Gateway 负责。
 
+Host 身份集成可以注册 `connection.registerAdmissionProvider()`，在 Host/Origin 信任检查后为 HTTP RPC 和 Gateway WebSocket 选择身份 Peer，或拒绝未登录请求。随后仍运行所有 `registerAdmissionGuard()` 守卫；Provider 未处理请求时，Connection 才回退到内置浏览器 Cookie / API Peer。登录前仍需可用的路由使用 `connection.trustRejection()` 单独执行 Host/Origin 检查，再自行验证状态与 CSRF。
+
 <a id="connection-generation"></a>
 ## Connection generation
 

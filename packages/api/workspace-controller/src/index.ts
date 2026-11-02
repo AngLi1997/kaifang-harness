@@ -1,14 +1,18 @@
 /** Host Workspace Remote owner: explicit commands and reconnect-safe state. */
 
 import { Context } from '@deepseek-ai/cordis'
+import { mkdir, realpath } from 'node:fs/promises'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import z from '@deepseek-ai/schemastery'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
+import { isKaifangUserPrincipal, platformUserKey } from '@deepseek-ai/dsh-kaifang-platform-auth'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { WorkspaceCommands } from './commands.ts'
 import { DirectoryPickerController } from './directory-picker.ts'
 import { WorkspaceFeed, workspaceView } from './feed.ts'
 import { defaultWorkspaceDirectory, validateDocumentsDirectory } from './default-directory.ts'
+import { DEFAULT_WORKSPACE_DIRECTORY } from './default-workspace.ts'
 import type {
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
@@ -37,6 +41,8 @@ export { DirectoryPickerController } from './directory-picker.ts'
 export interface Config {
   /** Override the system Documents directory with a fully qualified path. */
   documentsDirectory?: string
+  /** Parent for per-platform-user Web workspaces on a shared Host. */
+  platformUsersRootDirectory?: string
   /** Maximum duration of the operating system's Documents lookup. */
   documentsLookupTimeoutMs?: number
 }
@@ -57,6 +63,7 @@ export class WorkspaceController extends TypertRemoteService {
 
   static Config: z<Config, ResolvedConfig> = z.object({
     documentsDirectory: z.string(),
+    platformUsersRootDirectory: z.string(),
     documentsLookupTimeoutMs: z.natural().min(1).default(10_000),
   })
 
@@ -73,6 +80,9 @@ export class WorkspaceController extends TypertRemoteService {
     ctx.typert.resources.register('workspace', { field: 'workspaceId' })
     this.config = WorkspaceController.Config(config)
     if (this.config.documentsDirectory !== undefined) validateDocumentsDirectory(this.config.documentsDirectory)
+    if (this.config.platformUsersRootDirectory !== undefined) {
+      validateDocumentsDirectory(this.config.platformUsersRootDirectory)
+    }
     this.commands = new WorkspaceCommands(ctx)
     this.feed = new WorkspaceFeed(ctx)
     // This package is the Loader entry for both Remote owners it hosts: the
@@ -88,8 +98,13 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the Workspace and whether this call created it.
    */
   @Remote('create')
-  create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
-    return this.commands.create(request)
+  async create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
+    const partition = await this.platformPartition()
+    if (partition === undefined) return this.commands.create(request)
+    const path = await this.assertPathInPartition(request.path, partition.root)
+    const result = await this.commands.create({ path }, partition.ownerId)
+    if (result.created) this.ctx.remoteAccess.invalidate(principalOf(this.ctx.invocation))
+    return result
   }
 
   /**
@@ -102,6 +117,16 @@ export class WorkspaceController extends TypertRemoteService {
    */
   @Remote('initializeDefault')
   async initializeDefault(signal: AbortSignal): Promise<WorkspaceValue | undefined> {
+    const partition = await this.platformPartition()
+    if (partition !== undefined) {
+      signal.throwIfAborted()
+      const path = resolve(partition.root, DEFAULT_WORKSPACE_DIRECTORY)
+      await mkdir(path, { recursive: true })
+      const existing = await this.ctx.workspaceRegistry.resolveByPath(path, partition.ownerId)
+      const workspace = existing ?? await this.ctx.workspaceRegistry.create(path, undefined, partition.ownerId)
+      if (existing === undefined) this.ctx.remoteAccess.invalidate(principalOf(this.ctx.invocation))
+      return { workspace: workspaceView(workspace) }
+    }
     const workspace = await this.ctx.workspaceRegistry.initializeDefault(async () => {
       const timeout = AbortSignal.timeout(this.config.documentsLookupTimeoutMs)
       return await defaultWorkspaceDirectory(
@@ -109,6 +134,18 @@ export class WorkspaceController extends TypertRemoteService {
       )
     })
     return workspace === undefined ? undefined : { workspace: workspaceView(workspace) }
+  }
+
+  /** Whether the active Remote invocation belongs to a platform Web user. */
+  isPlatformUserInvocation(): boolean {
+    return isKaifangUserPrincipal(principalOf(this.ctx.invocation))
+  }
+
+  /** Resolve and confine a directory-picker request to the active platform user's data root. */
+  async directoryPickerPath(path: string | undefined): Promise<string | undefined> {
+    const partition = await this.platformPartition()
+    if (partition === undefined) return path
+    return this.assertPathInPartition(path ?? partition.root, partition.root)
   }
 
   /**
@@ -127,7 +164,19 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns deletion confirmation.
    */
   @Remote('delete')
-  delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
+  async delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
+    const partition = await this.platformPartition()
+    if (partition !== undefined) {
+      const workspace = this.ctx.workspaceRegistry.get(request.workspaceId)
+      if (workspace === undefined || workspace.ownerId !== partition.ownerId) {
+        throw new RemoteError('workspace/not-found', `workspace "${request.workspaceId}" not found`, {
+          workspaceId: request.workspaceId,
+        })
+      }
+      if (workspace.sessionIds.length > 0) {
+        throw new RemoteError('gateway/bad-request', 'move or delete this user’s sessions before deleting the workspace', {})
+      }
+    }
     return this.commands.delete(request)
   }
 
@@ -257,6 +306,37 @@ export class WorkspaceController extends TypertRemoteService {
           assertNever(frame)
       }
     }
+  }
+
+  private async platformPartition(): Promise<{ readonly ownerId: string; readonly root: string } | undefined> {
+    const principal = principalOf(this.ctx.invocation)
+    if (!isKaifangUserPrincipal(principal)) return undefined
+    const configuredRoot = this.config.platformUsersRootDirectory
+    if (configuredRoot === undefined || configuredRoot.trim() === '') {
+      throw new RemoteError('workspace/invalid-path', 'shared Web workspaces need platformUsersRootDirectory', { path: '' })
+    }
+    const ownerId = platformUserKey(principal)
+    const root = resolve(configuredRoot, ownerId)
+    await mkdir(root, { recursive: true })
+    return { ownerId, root: await realpath(root) }
+  }
+
+  private async assertPathInPartition(path: string, root: string): Promise<string> {
+    let canonical: string
+    try { canonical = await realpath(path) }
+    catch (error) {
+      throw new RemoteError(
+        'workspace/invalid-path',
+        `cannot resolve a directory inside the signed-in user's workspace: ${String(error)}`,
+        { path },
+        { cause: error },
+      )
+    }
+    const relativePath = relative(root, canonical)
+    if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+      throw new RemoteError('workspace/invalid-path', 'directory is outside the signed-in user workspace', { path })
+    }
+    return canonical
   }
 }
 

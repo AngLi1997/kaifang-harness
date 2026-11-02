@@ -148,6 +148,8 @@
     # Workspace commands and reconnect-safe projection over Typert Remote.
     - id: workspace-controller
       name: '@deepseek-ai/dsh-api-workspace-controller'
+      config:
+        platformUsersRootDirectory: !!js "process.env.DSH_KAIFANG_WORKSPACE_ROOT || (process.env.DSH_HOME ? process.env.DSH_HOME + '/kaifang-users' : (process.env.HOME ? process.env.HOME + '/.dsh/kaifang-users' : '/var/lib/dsh/kaifang-users'))"
 
     - id: cordis-host-runner
       name: '@deepseek-ai/dsh-cordis-host-runner'
@@ -234,6 +236,19 @@
         # deployment values, for example: ['app.internal', ...ctx.webStartup.trustedHosts].
         # The listener's bind IP is accepted separately from this list.
         trustedHosts: !!js ctx.webStartup.trustedHosts
+
+    # One shared Web Host serves all platform users. Each OAuth cookie selects
+    # its own Peer, and user workspaces live below the configured data root.
+    - id: kaifang-platform-auth
+      name: '@deepseek-ai/dsh-kaifang-platform-auth'
+      config:
+        issuer: !!js process.env.DSH_KAIFANG_IAM_ISSUER ?? ''
+        clientId: !!js process.env.DSH_KAIFANG_CLIENT_ID ?? 'kaifang-harness'
+        redirectUri: !!js process.env.DSH_KAIFANG_REDIRECT_URI ?? ''
+        audience: !!js process.env.DSH_KAIFANG_AUDIENCE ?? 'kaifang-meta-platform'
+        requiredScopes: ['model:invoke']
+        refreshSkewSeconds: 60
+        requestTimeoutMs: 10000
 
     # Raw Blob and ReadableStream uploads run independently of Connection's
     # RPC and generation service.

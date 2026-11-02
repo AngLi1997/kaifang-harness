@@ -26,6 +26,7 @@ kind: "package-group"
 | 包 | 职责 | ctx 键 |
 |---|---|---|
 | [client-ui-archive-tools](client-ui-archive-tools/README.zh.md) | 侧边栏档案工具目录、点击引用与 `@` 选取 | — |
+| [platform-auth](platform-auth/README.zh.md) | 共享 Web Host 的多用户 IAM 登录、Peer 准入与会话/工作区授权 | `ctx.kaifangPlatformAuth` |
 
 -----
 

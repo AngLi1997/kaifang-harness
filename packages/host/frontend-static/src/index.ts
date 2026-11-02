@@ -150,18 +150,28 @@ export function apply(ctx: Context, config: Config): void {
     return admitted ? undefined : new Response(body, { status, headers })
   }
   ctx.effect(() => ctx.webServer.registerFallback({
-    resource: (request, peer) => serveStatic(
-      request,
-      distRoot,
-      distIndex,
-      // A read with a Peer was admitted by its caller; an HTTP request carries
-      // none and passes Connection's browser authentication instead.
-      () => peer === undefined ? authorizeIndex(request) : undefined,
-      // The browser authentication admits the owner's shared browser Peer. The
-      // base goes in after all index transforms, so it precedes every resource
-      // reference they insert.
-      html => ctx.webServer.renderIndex(html, peer ?? ctx.connection.browserPeer)
-        .replace(/<head(?:\s[^>]*)?>/i, open => `${open}<base href="./">`),
-    ),
+    resource: (request, peer) => {
+      let indexPeer = peer
+      return serveStatic(
+        request,
+        distRoot,
+        distIndex,
+        // A read with a Peer was admitted by its caller; an HTTP request carries
+        // none and passes Connection's browser authentication instead.
+        () => peer === undefined ? authorizeIndex(request) : undefined,
+        // After the process-token exchange, select the platform identity Peer
+        // for index injections such as the Remote-access baseline. A signed-out
+        // browser may still load the sign-in overlay, so rejection only falls
+        // back to the static browser Peer; every API request remains gated.
+        (html) => {
+          if (indexPeer === undefined) {
+            const admission = ctx.connection.admit(request)
+            if ('peer' in admission) indexPeer = admission.peer
+          }
+          return ctx.webServer.renderIndex(html, indexPeer ?? ctx.connection.browserPeer)
+            .replace(/<head(?:\s[^>]*)?>/i, open => `${open}<base href="./">`)
+        },
+      )
+    },
   }), 'frontend-static: fallback seat')
 }

@@ -21,8 +21,10 @@ import type { SessionEvent, SessionHeader, SessionId, UserMessage } from '@deeps
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
-import type { Workspace } from '@deepseek-ai/dsh-workspace'
+import { RemoteError, principalOf, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
+import { isKaifangUserPrincipal, platformUserKey } from '@deepseek-ai/dsh-kaifang-platform-auth'
+import { WorkspaceId, type Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   ApiSessionAgentController,
   ApiSessionCwdConflict,
@@ -101,10 +103,13 @@ export class SessionCommandController {
    * @param request - optional blank Session to reuse, location, and Agent preset.
    * @returns the created or reused Session identity and its preset when configured.
    */
-  async create(request: SessionCreateRequest): Promise<SessionCreateValue> {
+  async create(request: SessionCreateRequest, principal?: Principal): Promise<SessionCreateValue> {
     if (request.workspaceId !== undefined && request.cwd !== undefined) {
       throw new RemoteError('gateway/bad-request', 'session.create accepts workspaceId or cwd, not both', {})
     }
+    const platformUser = isKaifangUserPrincipal(principal) ? principal : undefined
+    const ownerId = platformUser === undefined ? undefined : platformUserKey(platformUser)
+    const sessionPrefix = ownerId === undefined ? undefined : `user-${ownerId}-session-`
     let workspace: Workspace | undefined
     if (request.workspaceId !== undefined) {
       workspace = this.ctx.workspaceRegistry.get(request.workspaceId)
@@ -113,16 +118,37 @@ export class SessionCommandController {
           workspaceId: request.workspaceId,
         })
       }
+    } else if (ownerId !== undefined) {
+      workspace = this.ctx.workspaceRegistry.list().find(candidate => candidate.ownerId === ownerId)
+      if (workspace === undefined) {
+        throw new RemoteError('workspace/not-found', 'initialize the signed-in user workspace before creating a session', {
+          workspaceId: WorkspaceId('uninitialized'),
+        })
+      }
+    }
+    if (ownerId !== undefined && workspace?.ownerId !== ownerId) {
+      throw new RemoteError('workspace/not-found', `workspace "${request.workspaceId ?? ''}" not found`, {
+        workspaceId: request.workspaceId ?? WorkspaceId('uninitialized'),
+      })
+    }
+    if (sessionPrefix !== undefined && request.cwd !== undefined) {
+      throw new RemoteError('gateway/bad-request', 'platform users must create sessions inside an owned workspace', {})
+    }
+    if (sessionPrefix !== undefined && request.sessionId !== undefined && !String(request.sessionId).startsWith(sessionPrefix)) {
+      throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, { sessionId: request.sessionId })
     }
     const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+    const requestedSessionId = request.sessionId ?? (sessionPrefix === undefined
+      ? undefined
+      : brandString<SessionId>(`${sessionPrefix}${randomUUID()}`))
     let created: ApiSessionCreated
     try {
       created = await this.agents.createSession({
-        ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
+        ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
         cwd,
         ...(request.agentPreset === undefined ? {} : { agentPreset: request.agentPreset }),
-        reusable: sessionId => !this.ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)
-          && (workspace === undefined || workspace.sessionIds.includes(sessionId)),
+        reusable: candidateId => !this.ctx.workspaceRegistry.archivedSessionIds.includes(candidateId)
+          && (workspace === undefined || workspace.sessionIds.includes(candidateId)),
       })
     } catch (error) {
       this.rejectCreation(error)
@@ -131,6 +157,7 @@ export class SessionCommandController {
     if (workspace !== undefined) {
       try {
         await workspace.attachSession(sessionId)
+        if (platformUser !== undefined) this.ctx.remoteAccess.invalidate(platformUser)
       } catch (error) {
         throw new RemoteError(
           'session/workspace-attach-failed',
@@ -161,11 +188,13 @@ export class SessionCommandController {
         }
         await this.ctx.llm.resolveCallConfig(selected)
         agent.model.select(selected)
-        void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
-          this.ctx.logger.warn(
-            `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
-          )
-        })
+        if (!isKaifangUserPrincipal(principalOf(this.ctx.invocation))) {
+          void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
+            this.ctx.logger.warn(
+              `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
+            )
+          })
+        }
         return { selected: { ...selected } }
       } catch (error) {
         if (remoteErrorOf(error) !== undefined) throw error
@@ -211,7 +240,12 @@ export class SessionCommandController {
    * @param request - source Session and optional exact event boundary.
    * @returns the new Session identity.
    */
-  async fork(request: SessionForkRequest): Promise<SessionForkValue> {
+  async fork(request: SessionForkRequest, principal?: Principal): Promise<SessionForkValue> {
+    const ownerId = isKaifangUserPrincipal(principal) ? platformUserKey(principal) : undefined
+    const sessionPrefix = ownerId === undefined ? undefined : `user-${ownerId}-session-`
+    if (sessionPrefix !== undefined && !String(request.sessionId).startsWith(sessionPrefix)) {
+      throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, { sessionId: request.sessionId })
+    }
     let atSeq: ReturnType<typeof SessionSeq> | undefined
     try {
       atSeq = request.atSeq === undefined ? undefined : SessionSeq(request.atSeq)
@@ -248,7 +282,7 @@ export class SessionCommandController {
     const seed = buildForkSeed(source.events, boundary)
     let workspace: Workspace | undefined
     try {
-      workspace = await this.forkWorkspace(source.header)
+      workspace = await this.forkWorkspace(source.header, ownerId)
     } catch (error) {
       throw new RemoteError(
         'gateway/internal',
@@ -256,7 +290,7 @@ export class SessionCommandController {
         {},
       )
     }
-    const childId = brandString<SessionId>(`session-${randomUUID()}`)
+    const childId = brandString<SessionId>(`${sessionPrefix ?? 'session-'}${randomUUID()}`)
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
     try {
       const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
@@ -284,6 +318,7 @@ export class SessionCommandController {
     if (workspace !== undefined) {
       try {
         await workspace.attachSession(childId)
+        if (ownerId !== undefined && isKaifangUserPrincipal(principal)) this.ctx.remoteAccess.invalidate(principal)
       } catch (error) {
         throw new RemoteError(
           'session/workspace-attach-failed',
@@ -530,8 +565,8 @@ export class SessionCommandController {
     throw new RemoteError('gateway/internal', `failed to create session: ${String(error)}`, {})
   }
 
-  private async forkWorkspace(source: SessionHeader): Promise<Workspace | undefined> {
-    const workspaces = this.ctx.workspaceRegistry.list()
+  private async forkWorkspace(source: SessionHeader, ownerId?: string): Promise<Workspace | undefined> {
+    const workspaces = this.ctx.workspaceRegistry.list().filter(workspace => ownerId === undefined || workspace.ownerId === ownerId)
     const direct = workspaces.find(workspace => workspace.sessionIds.includes(source.id))
     if (direct !== undefined || source.origin !== 'subagent') return direct
     const lineage = await this.ctx.sessionQuery.traceSession(source.id)

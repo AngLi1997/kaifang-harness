@@ -33,7 +33,7 @@ import { readOnboardingApiKeyPresence } from './onboarding-credentials.ts'
 import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
 import { kaifangBridge, type KaifangAccount } from './kaifang-account.ts'
-import { browserKaifang, KAIFANG_CALLBACK_KEY } from './kaifang-web.ts'
+import { browserKaifang } from './kaifang-web.ts'
 import { KaifangWebSignIn, type KaifangWebSignInInjected } from './KaifangWebSignIn.tsx'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
@@ -172,16 +172,9 @@ export function apply(ctx: Context): void {
       }
     })().catch(() => { if (!grant.ended) publish({ ...snapshot, failed: true }) })
   })
-  // A plain browser signs in on the KaifangLab page; Desktop provides its own bridge.
+  // A plain browser signs in through the Host's platform IAM routes; Desktop keeps its native account bridge.
   const webKaifang = desktop || !config.kaifangSignIn ? undefined : browserKaifang(window, config.kaifangRequestTimeoutMs)
   if (webKaifang !== undefined) {
-    const handle = (event: StorageEvent): void => {
-      if (event.key === KAIFANG_CALLBACK_KEY) void webKaifang.receiveCallback(event.newValue)
-    }
-    ctx.effect(() => {
-      window.addEventListener('storage', handle)
-      return () => { window.removeEventListener('storage', handle) }
-    }, 'account: KaifangLab browser callback')
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({
       name: 'shell.overlay', id: 'kaifang-sign-in', locale: 'settings.account',
       inject: (): KaifangWebSignInInjected => ({
@@ -197,17 +190,17 @@ export function apply(ctx: Context): void {
   const kaifang = kaifangBridge(globalThis) ?? webKaifang
   if (kaifang !== undefined) {
     let kaifangDisposed = false
-    ctx.effect(() => () => { kaifangDisposed = true }, 'account: KaifangLab identity lifetime')
+    ctx.effect(() => () => { kaifangDisposed = true }, 'account: platform identity lifetime')
     const show = (account: KaifangAccount | null): void => {
       const { kaifang: _replaced, ...withoutKaifang } = snapshot
       publish(account === null ? withoutKaifang : { ...withoutKaifang, kaifang: account })
     }
     let changed = false
-    ctx.effect(() => kaifang.subscribe((account) => { changed = true; show(account) }), 'account: KaifangLab identity')
+    ctx.effect(() => kaifang.subscribe((account) => { changed = true; show(account) }), 'account: platform identity')
     // Focus and visibility events arrive together; one in-flight re-read serves both.
     let refreshingKaifang = false
     const refreshKaifang = (): void => {
-      if (refreshingKaifang || kaifangDisposed || snapshot.kaifang === undefined || document.visibilityState === 'hidden') return
+      if (refreshingKaifang || kaifangDisposed || document.visibilityState === 'hidden') return
       refreshingKaifang = true
       kaifang.refresh()
         .catch((error: unknown) => { console.error('[kaifang-account] account refresh failed', error) })
@@ -222,7 +215,7 @@ export function apply(ctx: Context): void {
         window.removeEventListener('focus', refreshKaifang)
         document.removeEventListener('visibilitychange', refreshKaifang)
       }
-    }, 'account: KaifangLab profile refresh')
+    }, 'account: platform session refresh')
     void kaifang.current().then((account) => {
       if (!changed && !kaifangDisposed) show(account)
       refreshKaifang()

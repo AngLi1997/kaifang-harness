@@ -9,7 +9,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import type { CredentialInfo } from '@deepseek-ai/dsh-credentials/types'
-import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
+import { isKaifangUserPrincipal } from '@deepseek-ai/dsh-kaifang-platform-auth'
 import { z } from 'zod'
 
 /**
@@ -98,6 +99,7 @@ export class CredentialsController extends TypertRemoteService {
    */
   @Remote
   async set(ref: string, value: string): Promise<void> {
+    this.rejectSharedProcessMutation(ref)
     const request = parseRequest('credentials.set', setRequestSchema, { ref, value })
     const branded = credentialRef(request.ref)
     const credentials = this.provider()
@@ -111,6 +113,7 @@ export class CredentialsController extends TypertRemoteService {
    */
   @Remote
   async unset(ref: string): Promise<void> {
+    this.rejectSharedProcessMutation(ref)
     const request = parseRequest('credentials.unset', unsetRequestSchema, { ref })
     const branded = credentialRef(request.ref)
     const credentials = this.provider()
@@ -128,6 +131,11 @@ export class CredentialsController extends TypertRemoteService {
       )
     }
     return credentials
+  }
+
+  private rejectSharedProcessMutation(ref: string): void {
+    if (!isKaifangUserPrincipal(principalOf(this.ctx.invocation))) return
+    throw new RemoteError('credential/rejected', 'shared Web users cannot change process-wide credentials', { ref })
   }
 
   /**

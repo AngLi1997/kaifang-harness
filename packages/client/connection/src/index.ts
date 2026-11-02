@@ -28,6 +28,8 @@ export type {
   ConnectionRpcHandler,
   ConnectionRpcHandlerResult,
   ConnectionRequestRejection,
+  ConnectionAdmissionGuard,
+  ConnectionAdmissionProvider,
   ConnectionRpcResult,
   ConnectionRequestBodyMode,
   ConnectionTrustRequest,

@@ -15,7 +15,8 @@ import type { SettingsDescriptor, SettingsPathOp, SettingsForms } from '@deepsee
 import type {
   SettingsDescribeValue, SettingsNamespaceView, SettingsPathOpView,
 } from '@deepseek-ai/dsh-settings/types'
-import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
+import { isKaifangUserPrincipal } from '@deepseek-ai/dsh-kaifang-platform-auth'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { z } from 'zod'
 import { CredentialsController } from './credentials.ts'
@@ -165,6 +166,7 @@ export class SettingsController extends TypertRemoteService {
    */
   @Remote
   async openSettingsDocument(signal: AbortSignal): Promise<SettingsDocumentOpenValue> {
+    this.rejectSharedProcessMutation('settings')
     const settings = this.provider()
     if (isAborted(signal)) throw new RemoteError('gateway/cancelled', 'settings document open was aborted', {})
     let path: string
@@ -190,6 +192,7 @@ export class SettingsController extends TypertRemoteService {
     input: Record<string, JsonValue> | SettingsPathOpView[],
     expectedRevision: number | undefined,
   ): Promise<SettingsNamespaceView> {
+    this.rejectSharedProcessMutation(ns)
     const parsed = settingsNamespaceRequestSchema.safeParse({ ns })
     if (!parsed.success) {
       throw new RemoteError('gateway/bad-request', `invalid payload for settings.${mode}`, { issues: parsed.error.issues })
@@ -210,6 +213,11 @@ export class SettingsController extends TypertRemoteService {
       throw new RemoteError('gateway/internal', `settings namespace "${ns}" was disposed after the ${mode}`, {})
     }
     return namespaceView(descriptor)
+  }
+
+  private rejectSharedProcessMutation(ns: string): void {
+    if (!isKaifangUserPrincipal(principalOf(this.ctx.invocation))) return
+    throw new RemoteError('settings/rejected', 'shared Web users cannot change process-wide settings', { ns })
   }
 
   /** Resolve the optional provider or report how to supply it. */

@@ -10,7 +10,7 @@ import {
   WorkspaceOrderInvalidError,
   WorkspaceUnknownSessionError,
 } from '@deepseek-ai/dsh-workspace'
-import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError, principalOf, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import { workspaceView } from './feed.ts'
 import type {
   WorkspaceArchiveSessionRequest,
@@ -42,14 +42,14 @@ export class WorkspaceCommands {
    * @param request - directory path to register.
    * @returns the Workspace and whether this call created it.
    */
-  create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
+  create(request: WorkspaceCreateRequest, ownerId?: string): Promise<WorkspaceCreateValue> {
     return this.enqueue(async () => {
       try {
-        const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path)
+        const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path, ownerId)
         if (existing !== undefined) {
           return { workspace: workspaceView(existing), created: false }
         }
-        const workspace = await this.ctx.workspaceRegistry.create(request.path)
+        const workspace = await this.ctx.workspaceRegistry.create(request.path, undefined, ownerId)
         return { workspace: workspaceView(workspace), created: true }
       } catch (error) {
         if (remoteErrorOf(error) !== undefined) throw error
@@ -100,6 +100,7 @@ export class WorkspaceCommands {
       if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }
+      this.ctx.remoteAccess.invalidate(principalOf(this.ctx.invocation))
       return { deleted: true }
     })
   }
@@ -179,7 +180,8 @@ export class WorkspaceCommands {
       }
       throw error
     }
-    return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
+    return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds]
+      .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) }
   }
 
   /**
@@ -191,7 +193,8 @@ export class WorkspaceCommands {
    */
   async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)
-    return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
+    return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds]
+      .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) }
   }
 
   /**
@@ -211,7 +214,8 @@ export class WorkspaceCommands {
       }
       throw error
     }
-    return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds] }
+    return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds]
+      .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) }
   }
 
   /**
@@ -223,7 +227,8 @@ export class WorkspaceCommands {
    */
   async unpinSession(request: WorkspaceUnpinSessionRequest): Promise<WorkspacePinValue> {
     await this.ctx.workspaceRegistry.unpinSession(request.sessionId)
-    return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds] }
+    return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds]
+      .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) }
   }
 
   private requireWorkspace(workspaceId: WorkspaceId): Workspace {

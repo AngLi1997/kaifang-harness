@@ -103,6 +103,12 @@ export interface ConnectionTrustRequest {
 /** HTTP status returned before dispatch, or undefined when the request may proceed. */
 export type ConnectionRequestRejection = 401 | 403 | undefined
 
+/** Synchronous identity gate applied after Host/Origin trust and before Peer admission. */
+export type ConnectionAdmissionGuard = (request: ConnectionTrustRequest) => 401 | 403 | undefined
+
+/** Select a request's authenticated Peer after Host/Origin trust and before built-in cookie admission. */
+export type ConnectionAdmissionProvider = (request: ConnectionTrustRequest) => PeerAdmission | undefined
+
 /** Root/index request facts used by the browser-token exchange. */
 export interface ConnectionIndexRequest extends ConnectionTrustRequest {
   readonly method?: string | undefined
@@ -217,6 +223,12 @@ export interface HostConnectionHandle {
    */
   readonly allowsRemoteAuthorities: boolean
 
+  /** Register a process-wide admission gate for every browser/API RPC and WebSocket upgrade. */
+  registerAdmissionGuard?(guard: ConnectionAdmissionGuard): () => void
+
+  /** Register identity-aware Peer selection for every browser/API RPC and WebSocket upgrade. */
+  registerAdmissionProvider?(provider: ConnectionAdmissionProvider): () => void
+
   /**
    * Compose exact Fetch routes and the shared-channel RPC interceptor.
    * @param channel - shared channel mounted by Connection.
@@ -231,6 +243,9 @@ export interface HostConnectionHandle {
    * @returns rejection status, or undefined when the route may accept the request.
    */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
+
+  /** Apply only the Host/Origin trust fence, without requiring a browser cookie or identity gate. */
+  trustRejection?(request: ConnectionTrustRequest): ConnectionRequestRejection
 
   /**
    * Admit an HTTP request against its signed browser or API credential and live Peer.

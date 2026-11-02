@@ -87,6 +87,10 @@ export class WorkspaceEntity implements Workspace {
     return this.record.path
   }
 
+  get ownerId(): string | undefined {
+    return this.record.ownerId
+  }
+
   get title(): string {
     return this.record.title
   }

@@ -61,7 +61,7 @@ kind: "package-reference"
 
 ### 设计理念
 
-本包是围绕 `serveStatic` 的一个函数插件，`serveStatic` 把 Fetch `Request` 映射为 `Response`：`apply` 从 `distIndex` 解析出 dist 根目录，并在 effect 作用域下注册回退 resource。每个请求中，resource 交给 `serveStatic` 一个 `authorizeIndex` 闭包——只在请求没有携带 Peer 时运行 `ctx.connection.authorizeIndex`——以及一个 `renderIndex` 闭包：它为该 Peer 或浏览器 Peer 对原始 `index.html` 运行 `ctx.webServer.renderIndex`，并把文档 base 拼接在起始 head 标签之后（在原始转换之后执行，因此也先于其标记）。按 webserver 的约定，席位只有单一所有者——第二次注册会抛错——且受 effect 作用域约束，因此 dispose fiber 即释放席位。
+本包是围绕 `serveStatic` 的一个函数插件，`serveStatic` 把 Fetch `Request` 映射为 `Response`：`apply` 从 `distIndex` 解析出 dist 根目录，并在 effect 作用域下注册回退 resource。每个请求中，resource 交给 `serveStatic` 一个 `authorizeIndex` 闭包——只在请求没有携带 Peer 时运行 `ctx.connection.authorizeIndex`——以及一个 `renderIndex` 闭包：它先让 Connection 按登录 Cookie 选择身份 Peer，再调用 `ctx.webServer.renderIndex`；未登录页面仍可渲染登录浮层。文档 base 在起始 head 标签之后拼接（在原始转换之后执行，因此也先于其标记）。按 webserver 的约定，席位只有单一所有者——第二次注册会抛错——且受 effect 作用域约束，因此 dispose fiber 即释放席位。
 
 ### 遍历栅栏
 

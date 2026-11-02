@@ -820,6 +820,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'rejection status, or undefined when the route may accept the request.',
       },
       {
+        signature: 'trustRejection?(request: ConnectionTrustRequest): ConnectionRequestRejection',
+        description: 'Apply only the Host/Origin trust fence to routes that must work before identity sign-in.',
+        parameters: [{ name: 'request', description: 'request headers from the HTTP request.' }],
+        returns: 'rejection status, or undefined when the route has a trusted authority.',
+      },
+      {
+        signature: 'registerAdmissionGuard?(guard: ConnectionAdmissionGuard): () => void',
+        description: 'Register a process-wide identity gate for browser/API RPC and WebSocket admission.',
+        parameters: [{ name: 'guard', description: 'synchronous request guard returning 401, 403, or undefined.' }],
+        returns: 'a disposer that unregisters the guard.',
+      },
+      {
+        signature: 'registerAdmissionProvider?(provider: ConnectionAdmissionProvider): () => void',
+        description: 'Register identity-aware Peer selection for browser/API RPC and WebSocket admission.',
+        parameters: [{ name: 'provider', description: 'synchronous request provider returning a Peer admission, a rejection, or undefined.' }],
+        returns: 'a disposer that unregisters the provider.',
+      },
+      {
         signature: 'admit(request: ConnectionTrustRequest): PeerAdmission',
         description: 'Admit an HTTP request against its signed browser or API credential and live Peer.',
         parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }],
@@ -5447,6 +5465,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ConnectionAdmission',
     declaration: 'export type ConnectionAdmission = {\n    readonly peer: PeerScope;\n    readonly release: () => Promise<void>;\n} | {\n    readonly rejection: 401 | 403 | 409;\n};',
+  },
+  {
+    name: 'ConnectionAdmissionGuard',
+    declaration: 'export type ConnectionAdmissionGuard = (request: ConnectionTrustRequest) => 401 | 403 | undefined;',
+  },
+  {
+    name: 'ConnectionAdmissionProvider',
+    declaration: 'export type ConnectionAdmissionProvider = (request: ConnectionTrustRequest) => PeerAdmission | undefined;',
   },
   {
     name: 'ConnectionFetchHandler',
