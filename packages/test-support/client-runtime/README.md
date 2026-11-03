@@ -124,7 +124,7 @@ The bench copies no production logic: it mounts the production `SlotRegistry`, p
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | `SlotTestRuntime` assembly, `TestRoot`, auto frame, `mount`/`dispose` |
-| [`src/sessions.ts`](src/sessions.ts) + [`src/workspaces.ts`](src/workspaces.ts) | `ISessions`/`IWorkspaces` test doubles and `FixtureSession` behavior stubs |
+| [`src/sessions.ts`](src/sessions.ts) + [`src/workspaces.ts`](src/workspaces.ts) | `ISessions`/`IWorkspaces` test doubles (including soft-delete `deleteSession`) and `FixtureSession` behavior stubs |
 | [`src/fixtures.ts`](src/fixtures.ts) | Plain fixture builders: conversation snapshots, workspace list state |
 | [`src/snapshot.ts`](src/snapshot.ts) | DOM snapshot serializer (class-hash folding, `<svg>` fingerprint) |
 | [`src/access.ts`](src/access.ts) | `allowAllAccess` props, `StaticRemoteAccess`, `staticAccessPlugin`, and `allowAllAccessPlugin`, the fixed-answer stand-ins for the remote-access Client row |

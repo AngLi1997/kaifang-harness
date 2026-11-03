@@ -19,7 +19,12 @@ type InvokeHandler = (event: InvokeEvent, ...args: unknown[]) => unknown
 const fileDrag = vi.hoisted(() => ({ dispose: vi.fn<() => Promise<void>>(), install: vi.fn() }))
 vi.mock('../src/file-drag.ts', () => ({ installDesktopFileDrag: () => { fileDrag.install(); return fileDrag.dispose } }))
 
-vi.mock('../src/web-document.ts', () => ({ authenticateWebHost: async () => 'test-cookie', serveWebDocument: vi.fn(), forwardWebRequest: vi.fn() }))
+vi.mock('../src/web-document.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/web-document.ts')>(),
+  authenticateWebHost: async () => 'test-cookie',
+  serveWebDocument: vi.fn(),
+  forwardWebRequest: vi.fn(),
+}))
 // Report persistence has its own unit tests; here it resolves within microtasks so the fatal
 // dialog never outlives the test that triggered it.
 vi.mock('../src/crash-report.ts', async importOriginal => ({
@@ -1152,7 +1157,7 @@ describe('desktop main startup', () => {
     await harness.hostStarted.promise
     expect(settled).toBe(false)
     harness.hosts[0]!.ready.resolve()
-    await expect(boot).resolves.toEqual({ injections: [], streamBaseUrl: 'http://127.0.0.1:3080' })
+    await expect(boot).resolves.toEqual({ injections: [], streamBaseUrl: 'http://127.0.0.1:3080', ownsHost: true })
     expect(harness.windows[0]!.urls).toEqual(['dsh-app://app/'])
   })
 
@@ -2086,7 +2091,7 @@ describe('desktop main startup', () => {
     expect(replacement.updateTasks).not.toHaveBeenCalled()
     replacement.ready.resolve()
     await vi.waitFor(() => { expect(harness.windows[0]!.urls).toEqual(['dsh-app://app/', 'dsh-app://app/']) })
-    await expect(Promise.resolve(invoke(DESKTOP_IPC.boot))).resolves.toEqual({ injections: [], streamBaseUrl: 'http://127.0.0.1:3099' })
+    await expect(Promise.resolve(invoke(DESKTOP_IPC.boot))).resolves.toEqual({ injections: [], streamBaseUrl: 'http://127.0.0.1:3099', ownsHost: true })
     if (mandatory) await answerMandatory('later')
     await expect(retry).resolves.toBe(false)
     expect(replacement.updateTasks.mock.calls).toEqual([['inspect']])
@@ -2525,8 +2530,9 @@ it.each(['failed', 'expired'] as const)('focuses DSH once when browser authoriza
   expect(window.focus).toHaveBeenCalledTimes(1)
 })
 
-it('routes Desktop authorization to the configured Platform Harness entry instead of the DSH authorize URL', async () => {
-  vi.stubEnv('VITE_HARNESS_WEB_URL', 'https://platform.example')
+it('opens the Host-provided authorization URL in the system browser for waiting-browser accounts', async () => {
+  // DeepSeek account OAuth uses the system browser. The first account-watch
+  // snapshot is ignored so a mid-flow restart does not re-open the browser.
   await import('../src/main.ts')
   await harness.preparing.promise
   harness.prepared.resolve()
@@ -2534,18 +2540,19 @@ it('routes Desktop authorization to the configured Platform Harness entry instea
   harness.hosts[0]!.ready.resolve()
   await Promise.resolve(invoke(DESKTOP_IPC.boot))
   await harness.navigated.promise
-  const sharedWindow = harness.windows.find(window => window.urls.includes('https://platform.example/harness'))!
-  sharedWindow.focus.mockClear()
-  const state: AccountView = {
-    status: 'signed-out', links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' },
-    attempt: { id: 'test-theme-attempt' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser',
-      authorizeUrl: 'https://platform.deepseek.com/dsh/authorize?state=state-1' },
-  }
-  harness.publishAccount(state)
-  harness.publishAccount(state)
-  await vi.waitFor(() => { expect(sharedWindow.focus).toHaveBeenCalledOnce() })
-  expect(sharedWindow.focus).toHaveBeenCalledOnce()
-  expect(harness.openExternal).not.toHaveBeenCalledWith(expect.stringContaining('/dsh/authorize'))
+  const authorizeUrl = 'https://platform.deepseek.com/dsh/authorize?state=state-1'
+  const links = { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' }
+  harness.publishAccount({
+    status: 'signed-out', links,
+    attempt: { id: 'test-theme-attempt-init' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser', authorizeUrl },
+  })
+  expect(harness.openExternal).not.toHaveBeenCalled()
+  harness.publishAccount({
+    status: 'signed-out', links,
+    attempt: { id: 'test-theme-attempt-next' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser', authorizeUrl },
+  })
+  await vi.waitFor(() => { expect(harness.openExternal).toHaveBeenCalledWith(authorizeUrl) })
+  expect(harness.openExternal).toHaveBeenCalledTimes(1)
 })
 
 it('disables native product events for a disabled Desktop launch', async () => {

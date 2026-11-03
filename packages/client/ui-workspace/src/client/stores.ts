@@ -33,7 +33,7 @@ type WorkspaceViewState = {
 type SessionOrderSource = {
   members: Readonly<Record<string, readonly SessionId[]>>
   summaries: SessionListState['byId']
-  rowState: Pick<SessionRowState, 'pinnedSessionIds' | 'archivedSessionIds'>
+  rowState: Pick<SessionRowState, 'pinnedSessionIds' | 'archivedSessionIds' | 'deletedSessionIds'>
 }
 
 /**

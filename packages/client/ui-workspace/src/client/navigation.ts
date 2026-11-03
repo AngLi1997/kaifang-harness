@@ -104,6 +104,8 @@ export interface UiWorkspace {
    * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
+  /** Soft-delete a Session (hide from UI; retain logs). Distinct from archive. */
+  deleteSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
   /**
    * Unarchive a Session, restoring it to its recorded Workspace position.
    * @param sessionId - Session to unarchive.
@@ -406,17 +408,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     if (this.mainReference?.sessionId === sessionId) this.clearMain()
   }
 
+  async deleteSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
+    await this.workspaces.deleteSession(sessionId, options)
+    if (this.mainReference?.sessionId === sessionId) this.clearMain()
+  }
+
   async unarchiveSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.unarchiveSession(sessionId)
   }
 
   async pinSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.pinSession(sessionId)
-    const { items, pinnedSessionIds, archivedSessionIds } = this.workspaces.list.getSnapshot()
+    const { items, pinnedSessionIds, archivedSessionIds, deletedSessionIds } = this.workspaces.list.getSnapshot()
     this.view.pinSessionOrder(
       sessionId,
       pinOrderAccounts(items, sessionId),
-      pinOrderSource(items, this.sessions.list.getSnapshot(), { pinnedSessionIds, archivedSessionIds }),
+      pinOrderSource(items, this.sessions.list.getSnapshot(), { pinnedSessionIds, archivedSessionIds, deletedSessionIds }),
     )
   }
 

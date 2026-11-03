@@ -53,8 +53,11 @@ const workspacePendingMutation = z.discriminatedUnion('operation', [
  * position), so the set never participates in the one-owner accounting
  * invariant. `pinnedSessionIds` is the registry-global pin set in pin order
  * (most recently pinned first); pinning and archival are mutually
- * exclusive, so archiving drops the session's pin. Both session sets are
- * defaulted so records written before the fields parse unchanged.
+ * exclusive, so archiving drops the session's pin. `deletedSessionIds` is the
+ * registry-global soft-delete set: UI hides those Sessions permanently from
+ * browsing filters while session logs stay on disk; soft-delete is distinct
+ * from archive. All three session sets are defaulted so records written
+ * before the fields parse unchanged.
  */
 export const workspaceDomainState = z.object({
   initialized: z.boolean(),
@@ -63,6 +66,7 @@ export const workspaceDomainState = z.object({
   workspaceIds: z.array(workspaceId),
   archivedSessionIds: z.array(sessionId).default([]),
   pinnedSessionIds: z.array(sessionId).default([]),
+  deletedSessionIds: z.array(sessionId).default([]),
   pendingMutation: workspacePendingMutation.optional(),
 })
 
@@ -80,7 +84,7 @@ export const workspaceDomainSpec = defineDomain({
   version: 2,
   global: {
     schema: workspaceDomainState,
-    initial: { initialized: false, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [] },
+    initial: { initialized: false, workspaceIds: [], archivedSessionIds: [], pinnedSessionIds: [], deletedSessionIds: [] },
   },
   tables: { workspaces: domainTable<WorkspaceId, WorkspaceRecord>(workspaceRecord) },
 })

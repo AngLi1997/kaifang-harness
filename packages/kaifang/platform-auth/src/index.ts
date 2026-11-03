@@ -19,6 +19,16 @@ import z from '@deepseek-ai/schemastery'
 import type { KaifangUserPrincipal } from './identity.ts'
 import { platformModelProviderId, platformUserKey } from './identity.ts'
 import { registerPlatformModelProvider } from './model-provider.ts'
+import {
+  PLATFORM_USER_GLOBAL_ACTIONS,
+  PLATFORM_USER_SESSION_ACTIONS,
+  PLATFORM_USER_WORKSPACE_ACTIONS,
+} from './peer-roles.ts'
+export {
+  PLATFORM_USER_GLOBAL_ACTIONS,
+  PLATFORM_USER_SESSION_ACTIONS,
+  PLATFORM_USER_WORKSPACE_ACTIONS,
+} from './peer-roles.ts'
 export { isKaifangUserPrincipal, platformModelProviderId, platformUserKey } from './identity.ts'
 export type { KaifangUserPrincipal } from './identity.ts'
 
@@ -35,23 +45,13 @@ const MAX_ATTEMPTS = 8
 const SESSION_ROLE = {
   name: 'platform-user-session',
   resource: 'session',
-  actions: [
-    'session/create', 'session/selectModel', 'session/openWorkspacePath', 'session/workspacePathApplications',
-    'session/rename', 'session/fork', 'session/prompt', 'session/attachment', 'session/updateQueue',
-    'session/cancel', 'session/page', 'session/follow', 'session/projections', 'session/list', 'session/search', 'session/control',
-    'workspace/insertSessionBefore', 'workspace/archiveSession', 'workspace/unarchiveSession',
-    'workspace/pinSession', 'workspace/unpinSession', 'workspace/follow',
-  ],
+  actions: [...PLATFORM_USER_SESSION_ACTIONS],
 } satisfies RemoteAccessRole<'session'>
 
 const WORKSPACE_ROLE = {
   name: 'platform-user-workspace',
   resource: 'workspace',
-  actions: [
-    'workspace/create', 'workspace/initializeDefault', 'workspace/rename', 'workspace/delete', 'session/create',
-    'workspace/insertBefore', 'workspace/insertSessionBefore', 'workspace/archiveSession',
-    'workspace/unarchiveSession', 'workspace/pinSession', 'workspace/unpinSession', 'workspace/follow',
-  ],
+  actions: [...PLATFORM_USER_WORKSPACE_ACTIONS],
 } satisfies RemoteAccessRole<'workspace'>
 
 // No-resource RPCs resolve to the global resource. Keep this allowlist limited
@@ -60,13 +60,7 @@ const WORKSPACE_ROLE = {
 const GLOBAL_ROLE = {
   name: 'platform-user-global',
   resource: 'global',
-  actions: [
-    'workspace/create', 'workspace/initializeDefault', 'workspace/follow',
-    'session/create', 'session/list', 'session/search', 'session/control', 'session/modelCatalog',
-    'session/initializeDefaultModel', 'settings/describe', 'credentials/describe',
-    'llm/listProviders', 'llm/listConfigurableProviders',
-    'directoryPicker/list', 'directoryPicker/createDirectory',
-  ],
+  actions: [...PLATFORM_USER_GLOBAL_ACTIONS],
 } satisfies RemoteAccessRole<'global'>
 
 /** Identity claims displayed by the Web account menu. */
@@ -242,6 +236,28 @@ function sessionIdFromHeaders(headers: ConnectionTrustRequest['headers']): strin
     catch {}
   }
   return cookieValue(headers, SESSION_COOKIE)
+}
+
+/** Read a Bearer access token from Authorization when Desktop presents a device ticket. */
+function bearerAccessToken(headers: ConnectionTrustRequest['headers']): string | undefined {
+  const value = headerValue(headers, 'authorization')
+  if (value === undefined) return undefined
+  const match = /^Bearer\s+(\S+)$/iu.exec(value.trim())
+  return match?.[1]
+}
+
+async function readJsonBody(req: IncomingMessage, limit = 65_536): Promise<unknown> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += part.length
+    if (size > limit) throw new Error('request body too large')
+    chunks.push(part)
+  }
+  if (chunks.length === 0) return undefined
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) }
+  catch { throw new Error('request body must be JSON') }
 }
 
 function attemptSessionIdFromHeaders(headers: ConnectionTrustRequest['headers'], state: string): string | undefined {
@@ -545,19 +561,126 @@ class PlatformSession {
     this.sessionEnded = undefined
   }
 
+  /**
+   * Admit a Desktop (or other non-browser) client that already holds Platform tokens.
+   * Creates a Host session cookie Peer so RPC/WS share the same kaifang-user partition as Web.
+   */
+  async admitDevice(tokens: {
+    accessToken: string
+    refreshToken: string
+    expiresAt?: number
+    scopes?: readonly string[]
+  }): Promise<{
+    sessionId: string
+    user: PlatformUser
+    accessToken: string
+    refreshToken: string
+    expiresAt: number
+    scopes: readonly string[]
+  }> {
+    if (tokens.refreshToken === '') {
+      throw new Error('device ticket requires a refresh token')
+    }
+    let accessToken = tokens.accessToken
+    let refreshToken = tokens.refreshToken
+    let expiresAt = tokens.expiresAt
+    let scopes = tokens.scopes
+    let claims: Record<string, unknown> | undefined
+    if (accessToken !== '') {
+      try { claims = decodeClaims(accessToken) } catch { claims = undefined }
+    }
+    const accessExpired = claims === undefined
+      || typeof claims.exp !== 'number'
+      || claims.exp * 1000 <= Date.now() + 5_000
+    if (accessExpired) {
+      const refreshed = await this.requestToken({
+        grant_type: 'refresh_token',
+        client_id: this.config.clientId,
+        refresh_token: refreshToken,
+      })
+      accessToken = refreshed.accessToken
+      refreshToken = refreshed.refreshToken
+      expiresAt = refreshed.expiresAt
+      scopes = refreshed.scopes
+      claims = decodeClaims(accessToken)
+    }
+    if (accessToken === '' || claims === undefined) {
+      throw new Error('device ticket requires a usable access token')
+    }
+    const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
+    const claimScopes = typeof claims.scope === 'string' ? claims.scope.split(/\s+/u).filter(Boolean) : []
+    const sub = requiredString(claims.sub, 'sub')
+    const tid = requiredString(claims.tid, 'tid')
+    if (claims.iss !== this.config.issuer || claims.azp !== this.config.clientId
+      || !audiences.includes(this.config.audience)) {
+      throw new Error('IAM access token has unexpected issuer, audience, or authorized party')
+    }
+    if (!this.config.requiredScopes.every(scope => claimScopes.includes(scope))) {
+      throw new Error('IAM access token is missing a required platform scope')
+    }
+    if (typeof claims.exp !== 'number' || claims.exp * 1000 <= Date.now()) {
+      throw new Error('IAM access token is expired')
+    }
+    const user = await this.userinfo(accessToken, sub)
+    const finalScopes = scopes !== undefined && scopes.length > 0 ? scopes : claimScopes
+    const finalExpiresAt = typeof expiresAt === 'number' && Number.isFinite(expiresAt)
+      ? Math.min(expiresAt, claims.exp * 1000)
+      : claims.exp * 1000
+    const sessionId = randomBytes(32).toString('base64url')
+    const session: StoredSession = {
+      version: RECORD_VERSION,
+      sub,
+      tid,
+      accessToken,
+      refreshToken,
+      expiresAt: finalExpiresAt,
+      scopes: finalScopes,
+      user,
+    }
+    await this.save(sessionId, session)
+    return {
+      sessionId,
+      user,
+      accessToken,
+      refreshToken,
+      expiresAt: finalExpiresAt,
+      scopes: finalScopes,
+    }
+  }
+
+  /** Map a live Host session from a Bearer access token presented by Desktop. */
+  sessionIdForAccessToken(accessToken: string): string | undefined {
+    if (accessToken === '') return undefined
+    for (const [sessionId, session] of this.sessions) {
+      if (session.accessToken === accessToken && session.expiresAt > Date.now()) return sessionId
+    }
+    return undefined
+  }
+
   private pruneAttempts(): void {
     const now = Date.now()
     for (const [state, attempt] of this.attempts) if (attempt.expiresAt <= now) this.attempts.delete(state)
   }
 
   private findByIdentity(identity: Pick<KaifangUserPrincipal, 'sub' | 'tid'>): StoredSession | undefined {
-    return [...this.sessions.values()].find(session => session.sub === identity.sub
-      && session.tid === identity.tid && session.expiresAt > Date.now())
+    const now = Date.now()
+    let best: StoredSession | undefined
+    for (const session of this.sessions.values()) {
+      if (session.sub !== identity.sub || session.tid !== identity.tid || session.expiresAt <= now) continue
+      if (best === undefined || session.expiresAt > best.expiresAt) best = session
+    }
+    return best
   }
 
+  /** Prefer the freshest live Host session for this opaque platform-model provider id. */
   accessTokenForProvider(provider: string): string | undefined {
-    return [...this.sessions.values()].find(session => platformModelProviderId(session) === provider
-      && session.expiresAt > Date.now())?.accessToken
+    const now = Date.now()
+    let best: StoredSession | undefined
+    for (const session of this.sessions.values()) {
+      if (platformModelProviderId(session) !== provider || session.expiresAt <= now) continue
+      if (best === undefined || session.expiresAt > best.expiresAt) best = session
+    }
+    return best?.accessToken
   }
 
   private async refreshSession(sessionId: string): Promise<StoredSession | undefined> {
@@ -823,7 +946,11 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
           void peer.dispose()
         }
       }
-      const sessionId = sessionIdFromHeaders(request.headers)
+      let sessionId = sessionIdFromHeaders(request.headers)
+      if (sessionId === undefined) {
+        const bearer = bearerAccessToken(request.headers)
+        if (bearer !== undefined) sessionId = auth.sessionIdForAccessToken(bearer)
+      }
       const identity = auth.identity(sessionId)
       if (sessionId === undefined || identity === undefined) return { rejection: 401 }
       let peer = peers.get(sessionId)
@@ -940,6 +1067,62 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
             console.warn('[kaifang-platform-auth] OAuth callback failed', error)
             res.setHeader('set-cookie', attemptCookie(state, undefined, 0, target))
             writeText(res, 400, 'Sign-in could not be completed. Return to the Harness Web app and try again.')
+          }
+        })),
+        webCtx.webServer.register(route(`${AUTH_PATH}/device`, async (req, res) => {
+          if (!checkTrusted(webCtx.connection, req, res)) return
+          if (req.method !== 'POST') { writeText(res, 405, 'method not allowed'); return }
+          if (!enabled) { writeText(res, 503, 'KaifangMeta IAM is not configured for this Web Host'); return }
+          try {
+            const body = record(await readJsonBody(req))
+            const bearer = bearerAccessToken(req.headers as ConnectionTrustRequest['headers'])
+            const accessToken = typeof body.accessToken === 'string'
+              ? body.accessToken
+              : (bearer ?? '')
+            const refreshToken = typeof body.refreshToken === 'string' ? body.refreshToken : ''
+            if (refreshToken === '') {
+              writeText(res, 400, 'device ticket requires refreshToken')
+              return
+            }
+            const scopes = Array.isArray(body.scopes) && body.scopes.every(scope => typeof scope === 'string')
+              ? body.scopes as string[]
+              : undefined
+            const expiresAt = typeof body.expiresAt === 'number' && Number.isFinite(body.expiresAt)
+              ? body.expiresAt
+              : undefined
+            const admitted = await auth.admitDevice({
+              accessToken,
+              refreshToken,
+              ...expiresAt === undefined ? {} : { expiresAt },
+              ...scopes === undefined ? {} : { scopes },
+            })
+            const endpoints = signInEndpoints(resolved, req, webCtx.webServer.port)
+            const payload = JSON.stringify({
+              ok: true,
+              account: {
+                username: admitted.user.username,
+                displayName: admitted.user.displayName,
+                email: admitted.user.email,
+                avatarUrl: null,
+              },
+              tokens: {
+                accessToken: admitted.accessToken,
+                refreshToken: admitted.refreshToken,
+                expiresAt: admitted.expiresAt,
+                scopes: admitted.scopes,
+              },
+            })
+            res.writeHead(200, {
+              'cache-control': 'no-store',
+              'content-type': 'application/json; charset=utf-8',
+              'content-length': Buffer.byteLength(payload),
+              'x-content-type-options': 'nosniff',
+              'set-cookie': sessionCookie(admitted.sessionId, 60 * 60 * 24 * 30, endpoints),
+            })
+            res.end(payload)
+          } catch (error) {
+            console.warn('[kaifang-platform-auth] device ticket admission failed', error)
+            writeText(res, 401, 'device ticket was rejected')
           }
         })),
         webCtx.webServer.register(route(`${AUTH_PATH}/cancel`, (req, res) => {

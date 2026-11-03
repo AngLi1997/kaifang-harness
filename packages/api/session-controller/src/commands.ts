@@ -99,6 +99,13 @@ export class SessionCommandController {
   ) {}
 
   /**
+   * In-flight prompt admissions keyed by session + client requestId.
+   * Dual clients (Web + Desktop) can race the same idempotent turn before the
+   * durable user/message lands; join them on one Host-side lease.
+   */
+  private readonly promptAdmissions = new Map<string, Promise<SessionPromptValue>>()
+
+  /**
    * Create one ordinary Session for a new conversation, reusing the named
    * blank Session while it is an unarchived member of the requested Workspace.
    * @param request - optional blank Session to reuse, location, and Agent preset.
@@ -352,62 +359,78 @@ export class SessionCommandController {
    * @returns acknowledgement that the Agent accepted the prompt.
    */
   async prompt(request: SessionPromptRequest, source: MessageSource, principal?: Principal): Promise<SessionPromptValue> {
-    const agent = await this.resolveAgent(request.sessionId)
-    if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
-    if (isKaifangUserPrincipal(principal)) {
-      const selection = await this.platformModel(principal)
-      if (selection === undefined) throw new RemoteError('session/provider-models-unavailable', 'KaifangMeta 暂无已授权的对话模型', {
-        provider: this.ctx.kaifangPlatformAuth.ensureModelProvider(principal),
-      })
-      const current = agent.model.current()
-      const available = current?.provider === selection.provider
-        && (await this.ctx.llm.listModels(selection.provider)).some(model => model.id === current.model)
-      if (!available) agent.model.select(selection)
-    }
-    const admission = resolvePromptFileReceipts(
-      request.content,
-      receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
-    )
-    // Encoded images and image upload receipts both make an image prompt.
-    const hasImage = admission.content.some(part => part.type === 'image')
-    const admit = async (): Promise<SessionPromptValue> => {
-      try {
-        if (hasImage) {
-          const current = agent.model.current()
-          if (current !== undefined) {
-            const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
-            if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
-              throw new RemoteError(
-                'session/attachment-invalid',
-                `Model "${current.model}" does not support image input.`,
-                { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
-              )
+    const leaseKey = promptAdmissionLeaseKey(request.sessionId, request.requestId)
+    const active = this.promptAdmissions.get(leaseKey)
+    if (active !== undefined) return active
+
+    const admission = (async (): Promise<SessionPromptValue> => {
+      const agent = await this.resolveAgent(request.sessionId)
+      // Durable + inbox copy of the same client requestId: idempotent turn (no double-run).
+      if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+      if (isKaifangUserPrincipal(principal)) {
+        const selection = await this.platformModel(principal)
+        if (selection === undefined) throw new RemoteError('session/provider-models-unavailable', 'KaifangMeta 暂无已授权的对话模型', {
+          provider: this.ctx.kaifangPlatformAuth.ensureModelProvider(principal),
+        })
+        const current = agent.model.current()
+        const available = current?.provider === selection.provider
+          && (await this.ctx.llm.listModels(selection.provider)).some(model => model.id === current.model)
+        if (!available) agent.model.select(selection)
+      }
+      const resolved = resolvePromptFileReceipts(
+        request.content,
+        receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
+      )
+      // Encoded images and image upload receipts both make an image prompt.
+      const hasImage = resolved.content.some(part => part.type === 'image')
+      const admit = async (): Promise<SessionPromptValue> => {
+        try {
+          if (hasImage) {
+            const current = agent.model.current()
+            if (current !== undefined) {
+              const model = await this.ctx.llm.resolveModelInfo(current.provider, current.model)
+              if (model.inputModalities !== undefined && !model.inputModalities.includes('image')) {
+                throw new RemoteError(
+                  'session/attachment-invalid',
+                  `Model "${current.model}" does not support image input.`,
+                  { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
+                )
+              }
             }
           }
+          const content = await this.ctx.attachments.admitPromptContent(resolved.content)
+          const message: UserMessage = createUserMessage({ content, source })
+          if (this.ctx.agents.get(agent.id) !== agent) {
+            throw new RemoteError(
+              'session/not-found',
+              `session "${agent.id}" was disposed during prompt admission`,
+              { sessionId: agent.id },
+            )
+          }
+          // Re-check after awaits: a peer may have committed the same requestId.
+          if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+          using binding = this.ctx.fileUploads.bindPrompt(agent, resolved.receiptIds, request.requestId)
+          if (request.mode === 'steer') agent.steer(message)
+          else agent.followup(message)
+          binding.commit()
+        } catch (error) {
+          if (remoteErrorOf(error) !== undefined) throw error
+          if (error instanceof AttachmentError) {
+            throw new RemoteError('session/attachment-invalid', error.message, { reason: error.code })
+          }
+          throw new RemoteError('session/agent-busy', 'prompt rejected', { reason: String(error) })
         }
-        const content = await this.ctx.attachments.admitPromptContent(admission.content)
-        const message: UserMessage = createUserMessage({ content, source })
-        if (this.ctx.agents.get(agent.id) !== agent) {
-          throw new RemoteError(
-            'session/not-found',
-            `session "${agent.id}" was disposed during prompt admission`,
-            { sessionId: agent.id },
-          )
-        }
-        using binding = this.ctx.fileUploads.bindPrompt(agent, admission.receiptIds, request.requestId)
-        if (request.mode === 'steer') agent.steer(message)
-        else agent.followup(message)
-        binding.commit()
-      } catch (error) {
-        if (remoteErrorOf(error) !== undefined) throw error
-        if (error instanceof AttachmentError) {
-          throw new RemoteError('session/attachment-invalid', error.message, { reason: error.code })
-        }
-        throw new RemoteError('session/agent-busy', 'prompt rejected', { reason: String(error) })
+        return { accepted: true }
       }
-      return { accepted: true }
+      return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
+    })()
+
+    this.promptAdmissions.set(leaseKey, admission)
+    try {
+      return await admission
+    } finally {
+      if (this.promptAdmissions.get(leaseKey) === admission) this.promptAdmissions.delete(leaseKey)
     }
-    return hasImage ? this.agents.serializeImageAdmission(agent, admit) : admit()
   }
 
   private async requireModel(selection: Pick<AgentModelSelection, 'provider' | 'model'>): Promise<void> {
@@ -477,7 +500,6 @@ export class SessionCommandController {
    */
   async updateQueue(request: SessionUpdateQueueRequest): Promise<SessionUpdateQueueValue> {
     if (request.action.kind === 'edit') {
-      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Remote callers can submit untyped JSON.
       if (request.action.content.some(block => block.type !== 'text')) {
         throw new RemoteError(
           'session/attachment-invalid',
@@ -632,13 +654,17 @@ function resolvePromptFileReceipts(
   return { content: resolved, receiptIds: [...receiptIds] }
 }
 
+/** Host-side lease identity for one client-minted prompt on one Session. */
+export function promptAdmissionLeaseKey(sessionId: SessionId, requestId: SessionRequestId): string {
+  return `${String(sessionId)}\0${String(requestId)}`
+}
+
 function hasPromptRequest(agent: Agent, requestId: SessionRequestId): boolean {
   const matches = (message: UserMessage): boolean => {
     const source = message.source
     return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
   }
   if (agent.inbox.nextTurn.some(matches) || agent.inbox.nextStep.some(matches)) return true
-  // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
   return agent.session.snapshotEvents().some((event) => {
     if (event.type !== 'user/message') return false
     const source = event.data.source

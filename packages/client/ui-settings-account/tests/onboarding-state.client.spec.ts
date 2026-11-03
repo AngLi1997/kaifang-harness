@@ -12,7 +12,10 @@ import { DesktopOnboardingController } from '../src/client/onboarding-state.ts'
 import { DESKTOP_ONBOARDING_NAMESPACE, OnboardingSettingsSchema, type OnboardingProgress, type OnboardingSettings } from '../src/onboarding-settings.ts'
 
 const cleanup: (() => void | Promise<void>)[] = []
-afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  for (const dispose of cleanup.splice(0).reverse()) await dispose()
+})
 
 function accountState(status?: 'credential-stored' | 'signed-out'): AccountSnapshot {
   return {
@@ -93,6 +96,12 @@ describe('desktop onboarding lifecycle', () => {
     h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', value: [{ currency: 'CNY', balance: '0' }], bonusWallets: [{ currency: 'CNY', balance: '1' }] } } })
     await h.controller.update({ step: 'credit' })
     expect(h.controller.state.getSnapshot().creditFunded).toBe(true)
+  })
+
+  it('skips the DeepSeek onboarding gate when Desktop is a shared-Host Remote Client', async () => {
+    vi.stubGlobal('__DSH_TRANSPORT__', { ownsHost: false, streamBaseUrl: 'http://127.0.0.1:3080' })
+    const h = await harness({})
+    expect(h.controller.state.getSnapshot()).toMatchObject({ status: 'ready', visible: false })
   })
 
   it('keeps the published snapshot stable when account details do not change onboarding', async () => {

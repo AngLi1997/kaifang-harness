@@ -549,6 +549,18 @@ describe('Session file uploads', () => {
     expect(followup).not.toHaveBeenCalled()
   })
 
+  it('joins concurrent same-requestId prompts on one Host admission lease', async () => {
+    const { controller, followup } = await uploadHarness()
+    const request = promptRequest([{ type: 'text', text: 'dual-client same turn' }])
+    const [first, second] = await Promise.all([
+      controller.prompt(request, USER_SOURCE),
+      controller.prompt(request, USER_SOURCE),
+    ])
+    expect(first).toEqual({ accepted: true })
+    expect(second).toEqual({ accepted: true })
+    expect(followup).toHaveBeenCalledOnce()
+  })
+
   it('rejects when the Agent disappears during prompt admission', async () => {
     const { controller, saveImages, disposeAgent } = await uploadHarness()
     const admitted = Promise.withResolvers<readonly ImageAttachmentRef[]>()

@@ -49,7 +49,7 @@ export class WorkspaceUnknownSessionError extends Error {
    * @param sessionId - The unknown session id.
    * @param verb - The registry operation that named the session.
    */
-  constructor(readonly sessionId: SessionId, verb: 'archive' | 'pin') {
+  constructor(readonly sessionId: SessionId, verb: 'archive' | 'pin' | 'delete') {
     super(`cannot ${verb} session '${sessionId}': live sessions and session persistence hold no such session`)
     this.name = 'WorkspaceUnknownSessionError'
   }
@@ -106,6 +106,16 @@ export interface ArchiveSessionOptions {
    * refusing the archive because of it. The archive is written first, then
    * the stops are requested; running work is never awaited to settlement, and
    * a provider failure is logged without undoing the archive.
+   */
+  readonly stopActivity?: boolean
+}
+
+/** Caller choices for {@link WorkspaceRegistry.deleteSession} (soft-delete). */
+export interface DeleteSessionOptions {
+  /**
+   * Ask the composed providers to stop the session's running work instead of
+   * refusing the soft-delete because of it. Soft-delete is written first, then
+   * the stops are requested; same settlement rules as archive.
    */
   readonly stopActivity?: boolean
 }
@@ -367,6 +377,7 @@ export class WorkspaceRegistry extends Service {
       // The chain slot serializes against every other registry write, so this
       // check-then-write pair cannot interleave with another archive.
       if (this.requireState().archivedSessionIds.includes(sessionId)) return
+      if ((this.requireState().deletedSessionIds ?? []).includes(sessionId)) return
       if (!(await this.sessionKnown(sessionId))) {
         throw new WorkspaceUnknownSessionError(sessionId, 'archive')
       }
@@ -410,6 +421,46 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * Soft-delete one session durably. Distinct from archive: the Session leaves
+   * every browsing filter (including "show archived") while its log stays on
+   * disk and its workspace `sessionIds` slot is retained. Soft-delete clears
+   * pin and archive membership in the same write. An already soft-deleted id
+   * resolves without writing, asking, or stopping.
+   */
+  get deletedSessionIds(): readonly SessionId[] {
+    return this.requireState().deletedSessionIds ?? []
+  }
+
+  /**
+   * Soft-delete one session. Without `stopActivity` the session must be
+   * inactive; with it, soft-delete is written then stops are requested.
+   * @param sessionId - The session to soft-delete.
+   * @param options - Whether running work is stopped instead of refusing.
+   */
+  deleteSession(sessionId: SessionId, options: DeleteSessionOptions = {}): Promise<void> {
+    return this.enqueueOperation(async () => {
+      if ((this.requireState().deletedSessionIds ?? []).includes(sessionId)) return
+      if (!(await this.sessionKnown(sessionId))) {
+        throw new WorkspaceUnknownSessionError(sessionId, 'delete')
+      }
+      if (options.stopActivity !== true) {
+        const activity = await this.ctx.waterfall(
+          'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
+        )
+        if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
+      }
+      const state = this.requireState()
+      await this.setState({
+        ...state,
+        deletedSessionIds: [...(state.deletedSessionIds ?? []), sessionId],
+        archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+        pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+      })
+      if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
+    })
+  }
+
+  /**
    * The registry-global pin set: sessions surfaced ahead of every unpinned
    * session on grouping surfaces. Pinning never touches workspace accounting.
    * @returns Session ids in pin order (most recently pinned first).
@@ -432,6 +483,9 @@ export class WorkspaceRegistry extends Service {
       if (this.requireState().pinnedSessionIds.includes(sessionId)) return
       if (this.requireState().archivedSessionIds.includes(sessionId)) {
         throw new WorkspaceArchivedSessionPinError(sessionId)
+      }
+      if ((this.requireState().deletedSessionIds ?? []).includes(sessionId)) {
+        throw new WorkspaceUnknownSessionError(sessionId, 'pin')
       }
       if (!(await this.sessionKnown(sessionId))) {
         throw new WorkspaceUnknownSessionError(sessionId, 'pin')
@@ -737,6 +791,7 @@ export class WorkspaceRegistry extends Service {
         workspaceIds,
         archivedSessionIds: state.archivedSessionIds,
         pinnedSessionIds: state.pinnedSessionIds,
+        deletedSessionIds: state.deletedSessionIds ?? [],
       })
     }
     await this.setState({
@@ -744,6 +799,7 @@ export class WorkspaceRegistry extends Service {
       workspaceIds,
       archivedSessionIds: state.archivedSessionIds,
       pinnedSessionIds: state.pinnedSessionIds,
+      deletedSessionIds: state.deletedSessionIds ?? [],
     })
   }
 
@@ -893,8 +949,16 @@ export class WorkspaceRegistry extends Service {
   }
 
   private async setState(state: WorkspaceDomainState): Promise<void> {
-    await (this.global as DomainGlobal<WorkspaceDomainState>).set(state)
-    this.state = state
+    // Keep session-set fields present so pre-soft-delete media and in-memory
+    // snapshots never expose undefined arrays to callers.
+    const normalized: WorkspaceDomainState = {
+      ...state,
+      archivedSessionIds: state.archivedSessionIds ?? [],
+      pinnedSessionIds: state.pinnedSessionIds ?? [],
+      deletedSessionIds: state.deletedSessionIds ?? [],
+    }
+    await (this.global as DomainGlobal<WorkspaceDomainState>).set(normalized)
+    this.state = normalized
   }
 
   private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {

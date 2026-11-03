@@ -134,6 +134,21 @@ export interface WorkspaceArchiveValue {
   readonly archivedSessionIds: readonly SessionId[]
 }
 
+/** Session requested for soft-delete (UI hide; logs retained; not archive). */
+export interface WorkspaceDeleteSessionRequest {
+  readonly sessionId: SessionId
+  /**
+   * Stop running work instead of refusing as `workspace/session-active`.
+   * Soft-delete write lands first; stops are not awaited for settlement.
+   */
+  readonly stopActivity?: boolean
+}
+
+/** Complete soft-deleted Session set after a mutation. */
+export interface WorkspaceDeleteSessionValue {
+  readonly deletedSessionIds: readonly SessionId[]
+}
+
 /** Session requested for pinning ahead of unpinned Sessions on grouping surfaces. */
 export interface WorkspacePinSessionRequest {
   readonly sessionId: SessionId
@@ -155,6 +170,8 @@ export interface WorkspaceBaseline {
   readonly archivedSessionIds: readonly SessionId[]
   /** Registry-global pin set, most recently pinned first. */
   readonly pinnedSessionIds: readonly SessionId[]
+  /** Registry-global soft-delete set (hidden from every browse filter). */
+  readonly deletedSessionIds: readonly SessionId[]
 }
 
 /**
@@ -169,6 +186,7 @@ export type WorkspaceFollowIncrement =
   | { readonly type: 'order'; readonly workspaceIds: readonly WorkspaceId[] }
   | { readonly type: 'archived'; readonly archivedSessionIds: readonly SessionId[] }
   | { readonly type: 'pinned'; readonly pinnedSessionIds: readonly SessionId[] }
+  | { readonly type: 'deleted'; readonly deletedSessionIds: readonly SessionId[] }
 
 /** Workspace state stream; every generation starts with exactly one baseline. */
 export type WorkspaceFollowFrame =

@@ -85,6 +85,8 @@ export interface IWorkspaces {
    *   running work fails as `workspace/session-active`, its details naming what runs.
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
+  /** Soft-delete a Session (hide from UI; retain logs). Distinct from archive. */
+  deleteSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
   /**
    * Unarchive a Session from the archived Session list.
    * @param sessionId - Session to unarchive.
@@ -163,6 +165,11 @@ export class WorkspaceController extends Service implements IWorkspaces {
   async unarchiveSession(sessionId: SessionId): Promise<void> {
     const result = await this.model.unarchiveSession(sessionId)
     if (!result.ok) throw commandError('session unarchive', result.error)
+  }
+
+  async deleteSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
+    const result = await this.model.deleteSession(sessionId, options)
+    if (!result.ok) throw new Error(`session soft-delete failed: ${result.error.code}: ${result.error.message}`)
   }
 
   async pinSession(sessionId: SessionId): Promise<void> {

@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import { apply, type AccountSectionInjected } from '../src/client/index.ts'
 
-afterEach(() => { vi.unstubAllEnvs() })
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 
 type AccessEffect = (() => void) | Iterable<() => void>
 
@@ -308,5 +308,58 @@ it('closes the sign-in dialog, its failure, and the pending authorization tab on
   } finally {
     b.dispose()
     open.mockRestore()
+  }
+})
+
+it('keeps the Desktop settings launcher without account/watch while DeepSeek surfaces stay gated', () => {
+  vi.stubEnv('DSH_CLIENT_VERSION', '0.0.0-test')
+  vi.stubGlobal('dshDesktop', {})
+  const guards: Guard[] = []
+  const registered = new Map<string, number>()
+  const lifetime: (() => void)[] = []
+  const ctx = {
+    effect: (install: () => (() => void) | undefined) => { const dispose = install(); if (dispose) lifetime.push(dispose) },
+    locale: { register: () => () => {}, bind: () => (key: string) => key, getSnapshot: () => ({ active: 'en' }) },
+    configForms: {
+      get: () => ({ subscribe: () => () => {}, getSnapshot: () => ({ status: 'loading', value: undefined }) }),
+      describe: () => ({ subscribe: () => () => {}, getSnapshot: () => ({ error: null }) }),
+      developerTools: { setEnabled: async () => undefined },
+    },
+    slots: {
+      inject: (_name: string, install: () => (() => void) | undefined) => {
+        const dispose = install()
+        return () => { dispose?.() }
+      },
+      register: (entry: { readonly name: string }) => {
+        registered.set(entry.name, (registered.get(entry.name) ?? 0) + 1)
+        return () => { registered.set(entry.name, registered.get(entry.name)! - 1) }
+      },
+    },
+    remoteAccess: {
+      whenAccess: (action: string, install: () => AccessEffect) => {
+        guards.push({ action, install, installed: undefined })
+        return () => {}
+      },
+    },
+    remote: {
+      $on: () => () => {},
+      session: { initializeDefaultModel: async () => ({ ok: true, value: undefined }) },
+      account: { getProfile: async () => ({ ok: true, value: null }), getBalance: async () => ({ ok: true, value: null }) },
+      $stream: () => ({ signal: new AbortController().signal, dispose: () => {}, async *[Symbol.asyncIterator]() { /* never */ } }),
+    },
+    theme: { getTheme: () => ({ active: { colorScheme: 'light' }, themes: [] }), register: () => () => {} },
+    on: () => () => {},
+    get: () => undefined,
+  }
+  try {
+    apply(ctx as never)
+    expect(new Set(guards.map(guard => guard.action))).toEqual(new Set(['account/watch']))
+    expect(registered.get('settings.launcher')).toBe(1)
+    expect(registered.get('settings.models.sign-in')).toBeUndefined()
+    expect(registered.get('shell.quota-notice')).toBeUndefined()
+    // Without granting account/watch, DeepSeek-only surfaces stay absent.
+    expect(guards.every(guard => guard.installed === undefined)).toBe(true)
+  } finally {
+    for (const dispose of lifetime.reverse()) dispose()
   }
 })

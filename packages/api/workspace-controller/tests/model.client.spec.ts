@@ -90,6 +90,10 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     request: WorkspaceArchiveSessionRequest,
   ) => Promise<RemoteResult<WorkspaceArchiveValue>> = request =>
     Promise.resolve(remoteOk({ archivedSessionIds: [request.sessionId] }))
+  onDeleteSession: (
+    request: { sessionId: SessionId; stopActivity?: boolean },
+  ) => Promise<RemoteResult<{ deletedSessionIds: SessionId[] }>> = request =>
+    Promise.resolve(remoteOk({ deletedSessionIds: [request.sessionId] }))
   onUnarchiveSession: (
     request: WorkspaceUnarchiveSessionRequest,
   ) => Promise<RemoteResult<WorkspaceArchiveValue>> = request =>
@@ -133,6 +137,11 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     return this.onArchiveSession(request)
   }
 
+  deleteSession(request: { sessionId: SessionId; stopActivity?: boolean }): Promise<RemoteResult<{ deletedSessionIds: SessionId[] }>> {
+    this.record('deleteSession', request)
+    return this.onDeleteSession(request)
+  }
+
   unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<RemoteResult<WorkspaceArchiveValue>> {
     this.record('unarchiveSession', request)
     return this.onUnarchiveSession(request)
@@ -166,8 +175,9 @@ function baseline(
   items: readonly WorkspaceView[] = [],
   archivedSessionIds: readonly SessionId[] = [],
   pinnedSessionIds: readonly SessionId[] = [],
+  deletedSessionIds: readonly SessionId[] = [],
 ): void {
-  model.replaceBaseline({ items, archivedSessionIds, pinnedSessionIds })
+  model.replaceBaseline({ items, archivedSessionIds, pinnedSessionIds, deletedSessionIds })
 }
 
 describe('ClientWorkspaceModel', () => {

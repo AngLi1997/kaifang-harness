@@ -53,6 +53,7 @@ export class WorkspaceFeed {
   private order: readonly string[]
   private archived: readonly string[]
   private pinned: readonly string[]
+  private deleted: readonly string[]
 
   /** @param ctx - Host context containing the authoritative Workspace registry. */
   constructor(private readonly ctx: Context) {
@@ -61,6 +62,7 @@ export class WorkspaceFeed {
     this.order = baseline.map(workspace => String(workspace.id))
     this.archived = ctx.workspaceRegistry.archivedSessionIds.map(String)
     this.pinned = ctx.workspaceRegistry.pinnedSessionIds.map(String)
+    this.deleted = ctx.workspaceRegistry.deletedSessionIds.map(String)
     ctx.on('domain/changed', (change: DomainChanged) => { this.changed(change) })
     ctx.effect(() => () => {
       for (const follower of this.followers) follower.close()
@@ -77,6 +79,7 @@ export class WorkspaceFeed {
       items: this.ctx.workspaceRegistry.list().map(workspaceView),
       archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds],
       pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds],
+      deletedSessionIds: [...this.ctx.workspaceRegistry.deletedSessionIds],
     }
   }
 
@@ -125,6 +128,11 @@ export class WorkspaceFeed {
       if (!sameStrings(this.pinned, nextPinned)) {
         this.pinned = nextPinned
         this.publish({ type: 'pinned', pinnedSessionIds: [...state.pinnedSessionIds] })
+      }
+      const nextDeleted = state.deletedSessionIds.map(String)
+      if (!sameStrings(this.deleted, nextDeleted)) {
+        this.deleted = nextDeleted
+        this.publish({ type: 'deleted', deletedSessionIds: [...state.deletedSessionIds] })
       }
       return
     }

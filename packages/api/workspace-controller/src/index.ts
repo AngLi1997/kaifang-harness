@@ -15,6 +15,8 @@ import { defaultWorkspaceDirectory, validateDocumentsDirectory } from './default
 import { DEFAULT_WORKSPACE_DIRECTORY } from './default-workspace.ts'
 import type {
   WorkspaceArchiveSessionRequest,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceArchiveValue,
   WorkspaceBaseline,
   WorkspaceCreateRequest,
@@ -164,20 +166,15 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns deletion confirmation.
    */
   @Remote('delete')
-  async delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
-    const partition = await this.platformPartition()
-    if (partition !== undefined) {
-      const workspace = this.ctx.workspaceRegistry.get(request.workspaceId)
-      if (workspace === undefined || workspace.ownerId !== partition.ownerId) {
-        throw new RemoteError('workspace/not-found', `workspace "${request.workspaceId}" not found`, {
-          workspaceId: request.workspaceId,
-        })
-      }
-      if (workspace.sessionIds.length > 0) {
-        throw new RemoteError('gateway/bad-request', 'move or delete this user’s sessions before deleting the workspace', {})
-      }
-    }
-    return this.commands.delete(request)
+  delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
+    // Enqueue immediately (ownership runs inside the command queue) so a
+    // concurrent rename cannot leapfrog while platformPartition awaits.
+    // Do not require clients to empty sessionIds first — registration drop
+    // ungroups Sessions, matching the Web/Desktop delete-workspace copy.
+    return this.commands.delete(request, async () => {
+      const partition = await this.platformPartition()
+      return partition?.ownerId
+    })
   }
 
   /**
@@ -218,6 +215,15 @@ export class WorkspaceController extends TypertRemoteService {
   @Remote('unarchiveSession')
   unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     return this.commands.unarchiveSession(request)
+  }
+
+  /**
+   * Soft-delete one Session: leave every browse filter while retaining logs.
+   * Distinct from {@link archiveSession}.
+   */
+  @Remote('deleteSession')
+  deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteSessionValue> {
+    return this.commands.deleteSession(request)
   }
 
   /**
@@ -268,6 +274,7 @@ export class WorkspaceController extends TypertRemoteService {
         items: items.map(item => ({ ...item, sessionIds: sessions(item.sessionIds) })),
         archivedSessionIds: sessions(value.archivedSessionIds),
         pinnedSessionIds: sessions(value.pinnedSessionIds),
+        deletedSessionIds: sessions(value.deletedSessionIds),
       }
     }
     for await (const frame of this.feed.follow(signal)) {
@@ -300,6 +307,9 @@ export class WorkspaceController extends TypertRemoteService {
           break
         case 'pinned':
           yield { type: 'pinned', pinnedSessionIds: sessions(frame.pinnedSessionIds) }
+          break
+        case 'deleted':
+          yield { type: 'deleted', deletedSessionIds: sessions(frame.deletedSessionIds) }
           break
         /* v8 ignore next -- closed follow-frame union. */
         default:

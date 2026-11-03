@@ -8,6 +8,8 @@ import type {
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceBaseline,
+  WorkspaceDeleteSessionRequest,
+  WorkspaceDeleteSessionValue,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteValue,
@@ -33,6 +35,7 @@ export interface WorkspaceSnapshot {
   readonly items: readonly WorkspaceView[]
   /** Complete registry-global archive set in Host order. */
   readonly archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds']
+  readonly deletedSessionIds: WorkspaceDeleteSessionValue['deletedSessionIds']
   /** Complete registry-global pin set, most recently pinned first. */
   readonly pinnedSessionIds: WorkspacePinValue['pinnedSessionIds']
   readonly state: 'idle' | 'loading' | 'error'
@@ -52,6 +55,7 @@ export interface WorkspaceFollowSink {
   replaceOrder(workspaceIds: readonly WorkspaceId[]): void
   /** Replace the complete archived Session set. */
   replaceArchived(sessionIds: WorkspaceArchiveValue['archivedSessionIds']): void
+  replaceDeleted(sessionIds: WorkspaceDeleteSessionValue['deletedSessionIds']): void
   /** Replace the complete pinned Session set. */
   replacePinned(pinnedSessionIds: WorkspacePinValue['pinnedSessionIds']): void
 }
@@ -62,6 +66,8 @@ export interface WorkspaceFollowSink {
 export class ClientWorkspaceModel implements WorkspaceFollowSink {
   private items: readonly WorkspaceView[] = []
   private archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds'] = []
+  private deletedSessionIds: WorkspaceDeleteSessionValue['deletedSessionIds'] = []
+  private deleteRequestSeq = 0
   private pinnedSessionIds: WorkspacePinValue['pinnedSessionIds'] = []
   private state: WorkspaceSnapshot['state'] = 'loading'
   private phase: WorkspaceListPhase = 'pending'
@@ -224,6 +230,25 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   }
 
   /**
+   * Soft-delete one Session and install the returned complete soft-delete set.
+   * Also refreshes archive/pin projections when the Host cleared those memberships.
+   */
+  async deleteSession(
+    sessionId: WorkspaceDeleteSessionRequest['sessionId'],
+    options: { readonly stopActivity?: boolean } = {},
+  ): Promise<RemoteResult<WorkspaceDeleteSessionValue>> {
+    const requestSeq = ++this.deleteRequestSeq
+    const result = await this.remote.deleteSession({
+      sessionId,
+      ...(options.stopActivity === true ? { stopActivity: true } : {}),
+    })
+    if (result.ok && requestSeq === this.deleteRequestSeq) {
+      this.installDeleted(result.value.deletedSessionIds)
+    }
+    return result
+  }
+
+  /**
    * Pin one Session and install the returned complete pin set.
    * A reply superseded by a later pin request or a pushed set installs nothing.
    * @param sessionId - Session to pin.
@@ -265,9 +290,11 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     this.orderFrameGeneration++
     this.archiveRequestSeq++
     this.pinRequestSeq++
+    this.deleteRequestSeq++
     this.installViews(baseline.items)
     this.installArchived(baseline.archivedSessionIds)
     this.installPinned(baseline.pinnedSessionIds)
+    this.installDeleted(baseline.deletedSessionIds)
     this.state = 'idle'
     this.phase = 'ready'
     this.error = null
@@ -297,6 +324,15 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   replaceArchived(archivedSessionIds: WorkspaceArchiveValue['archivedSessionIds']): void {
     this.archiveRequestSeq++
     this.installArchived(archivedSessionIds)
+  }
+
+  /**
+   * Replace the soft-deleted Session set from the current follow generation.
+   * @param deletedSessionIds - complete Host-confirmed soft-delete set.
+   */
+  replaceDeleted(deletedSessionIds: WorkspaceDeleteSessionValue['deletedSessionIds']): void {
+    this.deleteRequestSeq++
+    this.installDeleted(deletedSessionIds)
   }
 
   /**
@@ -350,6 +386,7 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
       items: this.items,
       archivedSessionIds: this.archivedSessionIds,
       pinnedSessionIds: this.pinnedSessionIds,
+      deletedSessionIds: this.deletedSessionIds,
       state: this.state,
       phase: this.phase,
       error: this.error,
@@ -360,6 +397,13 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     if (archivedSessionIds.length === this.archivedSessionIds.length
       && archivedSessionIds.every((id, index) => id === this.archivedSessionIds[index])) return
     this.archivedSessionIds = [...archivedSessionIds]
+    this.invalidate()
+  }
+
+  private installDeleted(deletedSessionIds: WorkspaceDeleteSessionValue['deletedSessionIds']): void {
+    if (deletedSessionIds.length === this.deletedSessionIds.length
+      && deletedSessionIds.every((id, index) => id === this.deletedSessionIds[index])) return
+    this.deletedSessionIds = [...deletedSessionIds]
     this.invalidate()
   }
 

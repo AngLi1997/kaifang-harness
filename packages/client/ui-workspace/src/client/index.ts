@@ -38,7 +38,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the Session root standard-hook merge.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import {
-  type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
+  type ArchiveSessionInjected, type DeleteSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
+  type SessionDeleteConfirmInjected, type SessionDeleteConfirmRequest,
   type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
   type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
@@ -48,6 +49,7 @@ import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
+import { DeleteSessionMenuItem, SessionDeleteConfirmDialog } from './session-actions/DeleteSession.tsx'
 import { derive } from './session-actions/derived.ts'
 import { ForkSessionMenuItem } from './session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from './session-actions/PinSession.tsx'
@@ -159,12 +161,14 @@ export function apply(ctx: Context): void {
   // Registry-global sets as Sets, rebuilt only when the Workspace snapshot changes.
   const pinnedSet = derive(workspaces.list, snapshot => new Set<SessionId>(snapshot.pinnedSessionIds))
   const archivedSet = derive(workspaces.list, snapshot => new Set<SessionId>(snapshot.archivedSessionIds))
+  const deletedSet = derive(workspaces.list, snapshot => new Set<SessionId>(snapshot.deletedSessionIds))
   // Plugin-private facts the row actions and their overlay surfaces share:
   // the pending rename request and the notice on display. Each business
   // writes through its own injected callback and the surface reads through
   // its bound hook.
   const renameRequest = derive(shortcutControls.state, state => state.renameTarget)
   const archiveRequest = createSnapshotStore<SessionArchiveConfirmRequest | null>(null)
+  const deleteRequest = createSnapshotStore<SessionDeleteConfirmRequest | null>(null)
   const requestSessionRename = shortcutControls.rename
   const unarchiveSession = (sessionId: SessionId): void => {
     uiWorkspace.unarchiveSession(sessionId).catch((reason: unknown) => {
@@ -219,6 +223,21 @@ export function apply(ctx: Context): void {
     stopAndArchiveSession: async (sessionId) => {
       await uiWorkspace.archiveSession(sessionId, { stopActivity: true })
       notify({ kind: 'stoppedAndArchived', sessionId })
+    },
+  })
+  const deleteInjected = (): DeleteSessionInjected => ({
+    hooks: { deleted: deletedSet },
+    requestSessionDelete: (sessionId) => {
+      const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId
+      deleteRequest.set({ sessionId, displayTitle })
+    },
+  })
+  const deleteConfirmInjected = (): SessionDeleteConfirmInjected => ({
+    hooks: { deleteRequest },
+    settleSessionDelete: () => { deleteRequest.set(null) },
+    // Soft-delete: distinct from archive; logs retained; row leaves every filter.
+    deleteSession: async (sessionId) => {
+      await uiWorkspace.deleteSession(sessionId, { stopActivity: true })
     },
   })
   const forkInjected = (): ForkSessionInjected => ({
@@ -322,6 +341,7 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'rename', order: 200, locale: NS, inject: renameInjected }, RenameSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'fork', order: 300, locale: NS, inject: forkInjected }, ForkSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'archive', order: 400, locale: NS, inject: archiveInjected }, ArchiveSessionMenuItem)
+    yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'delete', order: 425, locale: NS, inject: deleteInjected }, DeleteSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'session-id', order: 450, locale: NS, inject: sessionIdInjected }, SessionIdMenuItem)
   })
   ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {
@@ -337,6 +357,9 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({
       name: 'shell.overlay', id: 'workspace.session-archive', locale: NS, inject: archiveConfirmInjected,
     }, SessionArchiveConfirmDialog)
+    yield ctx.slots.register({
+      name: 'shell.overlay', id: 'workspace.session-delete', locale: NS, inject: deleteConfirmInjected,
+    }, SessionDeleteConfirmDialog)
     yield ctx.slots.register({
       name: 'shell.overlay', id: 'workspace.row-toast', inject: rowToastInjected,
       children: { 'workspace.toast': { kind: 'keyed', scope: 'root' } },

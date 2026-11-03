@@ -218,7 +218,9 @@ Web 侧的对应命令是 `pnpm run dev:web` 与 `pnpm run start:web`，见[开�
 
 Welcome 提供平台 IAM 账号密码登录和一键 OAuth 入口。设置页只填写平台根地址，例如 `http://127.0.0.1:3001`；Desktop 打开平台公开的 `/harness` 路由，该页面再跳转到平台部署配置的共享 Harness Host。Host 使用 `kaifang-harness` 发起 PKCE 授权，账号登录后平台显示 OAuth 授权确认页。平台根地址由用户在 Welcome 设置页输入并保存在本机；Desktop 不会读取其他仓库的 `.env`，也没有构建时默认值。账号密码由主进程通过共享窗口使用的持久 Electron Session 提交给平台 IAM，随后 Host 完成 OAuth 流程。本地 API Key 仍可在模型设置中配置；本地 Session 不会复制到共享 Host。
 
-当既没有 DeepSeek 账号也没有 API Key 时，启动显示原生 Welcome 登录页；用户可用平台账号密码登录，或一键进入 Harness OAuth 流程。账号密码经主进程提交到平台 IAM，SSO Cookie 写入共享窗口使用的持久分区；Host 随后执行 PKCE 授权并显示确认页。平台根地址由用户在 Welcome 设置页输入并保存在本机；桌面不会读取其他仓库的 `.env`，也没有构建时默认值。已有本地账号或 API Key 时直接进入本地工作区。
+若本机已保存平台根地址且平台会话仍可用（或可刷新），冷启动以及之后每次 `enterWorkspace` 都会在壳层文档加载前重试 `activateSharedHostIfPossible`：Desktop 交换 device ticket，以 Remote Client（`ownsHost=false`）挂到共享 Host，并同步工作区、Session 与模型，无需先退出再登录。若 access token 已过期且无法刷新，Desktop 会提示重新平台登录，而不是一直静默停在本地 Host。共享 Host 不可达时仍使用内嵌本地 Host，并在下次进入工作区时重试挂载。Web 与 Desktop 之间的工作区创建/重命名/删除双向刷新，在两端都已挂到同一共享 Host 后，由既有的 `workspace/follow` 推送完成。
+
+当既没有 DeepSeek 账号也没有 API Key 时，启动显示原生 Welcome 登录页；用户可用平台账号密码登录，或一键进入 Harness OAuth 流程。账号密码经主进程提交到平台 IAM，SSO Cookie 写入共享窗口使用的持久分区；Host 随后执行 PKCE 授权并显示确认页。平台根地址由用户在 Welcome 设置页输入并保存在本机；桌面不会读取其他仓库的 `.env`，也没有构建时默认值。已有本地账号或 API Key 时直接进入工作区壳层（共享 Host 激活成功则挂 Remote Client，否则本地 Host）。
 
 欢迎窗口在显示前读取共享的 `locale.preference`。用户明确选择的受支持语言优先；否则 Desktop 按系统语言顺序匹配支持的语言，并以英文兜底。主界面在挂载前通过隔离 preload 读取同一偏好和系统语言顺序。在设置中切换语言会更新桌面壳的当前词典和菜单；自动选择不会写入偏好。欢迎窗口不提供语言切换入口。
 
@@ -375,7 +377,7 @@ node apps/desktop/node_modules/pnpm/bin/pnpm.mjs --dir apps/desktop run test:upd
 
 仅向应用提供的 `dshOnboarding.hasApiKey()` preload 方法返回当前 API Key 是否存在，供本地工作区启动判断使用；只有受管理的应用主 frame 可以调用。
 
-共享 Harness 模式只填写平台根地址，Desktop 在独立 Electron 窗口打开平台公开的 `/harness` 路由；路由再跳转到平台部署配置的共享 Web Host。Host 使用平台 IAM/PKCE，登录后显示 Harness OAuth 授权确认页。地址由用户在 Welcome 设置中输入并保存；Desktop 不会读取其他仓库的 `.env`，也没有构建时默认值。生产地址必须使用 HTTPS，仅回环地址开发时允许 HTTP。该窗口不加载 Desktop preload，也不启用 Node；Web Host 在服务端保存 OAuth token。Web 与 Desktop 使用不同 Cookie 上下文；两端登录同一平台身份（`tenant_id + sub`）后，Host 会提供相同工作区与 Session，并将每个活动 Session 的流式事件推送到两端。配置后启动会自动打开已配置页面，应用菜单可重新打开或切换到本地工作区。未配置地址时仍可使用本地工作区。本地 `$DSH_HOME` Session 不会复制到共享 Host，文件拖放等仅原生 Desktop 集成在远程窗口不可用。打包应用注册 `dsh://open` 以聚焦当前窗口。macOS 开发启动器在 `.desktop-build/development` 下准备经临时签名的 `Harness Dev.app`，在 Info.plist 中声明 `dsh` 并注册到 Launch Services。启动此应用会将其设为 `dsh://` 默认处理程序；启动打包应用会重新注册打包版处理程序。
+共享 Harness 模式只填写平台根地址，Desktop 在独立 Electron 窗口打开平台公开的 `/harness` 路由；路由再跳转到平台部署配置的共享 Web Host。Host 使用平台 IAM/PKCE，登录后显示 Harness OAuth 授权确认页。地址由用户在 Welcome 设置中输入并保存；Desktop 不会读取其他仓库的 `.env`，也没有构建时默认值。生产地址必须使用 HTTPS，仅回环地址开发时允许 HTTP。该窗口不加载 Desktop preload，也不启用 Node；Web Host 在服务端保存 OAuth token。Web 与 Desktop 使用不同 Cookie 上下文；两端登录同一平台身份（`tenant_id + sub`）后，Host 会提供相同工作区与 Session，并将每个活动 Session 的流式事件推送到两端。之后 Desktop 冷启动若仍持有该平台会话，在共享 Host 可达时会自动以 Remote Client 挂载。配置后启动会自动打开已配置页面，应用菜单可重新打开或切换到本地工作区。未配置地址时仍可使用本地工作区。本地 `$DSH_HOME` Session 不会复制到共享 Host，文件拖放等仅原生 Desktop 集成在远程窗口不可用。打包应用注册 `dsh://open` 以聚焦当前窗口。macOS 开发启动器在 `.desktop-build/development` 下准备经临时签名的 `Harness Dev.app`，在 Info.plist 中声明 `dsh` 并注册到 Launch Services。启动此应用会将其设为 `dsh://` 默认处理程序；启动打包应用会重新注册打包版处理程序。
 
 内嵌 Platform 视图在文档加载完成前保持隐藏，让渲染层加载图标可见。关闭或替换待加载视图后，该视图不会再次出现。强更策略或普通更新提示阻止打开 Platform 视图；清理存储期间开始阻断时，待打开视图也不会挂载。 所属应用文档刷新或替换、渲染进程终止以及窗口关闭也会销毁原生视图，不依赖 React 清理。
 

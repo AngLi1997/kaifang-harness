@@ -142,15 +142,35 @@ export class TestWorkspaces implements IWorkspaces {
    * observable effect: the id joins the list state's archive set.
    * @param sessionId - session to archive.
    */
-  async archiveSession(sessionId: SessionId): Promise<void> {
-    this.calls.push({ method: 'archiveSession', args: [sessionId] })
+  async archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void> {
+    this.calls.push({ method: 'archiveSession', args: [sessionId, options] })
     const stub = this.stubs.get('archiveSession')
     if (stub !== undefined) {
-      await (stub(sessionId) as Promise<void>)
+      await (stub(sessionId, options) as Promise<void>)
       return
     }
     await this.update((draft) => {
       draft.archivedSessionIds = [...draft.archivedSessionIds, sessionId]
+    })
+  }
+
+  /**
+   * Soft-delete a session (recorded). Distinct from archive: the id joins the
+   * soft-delete set and leaves archive/pin sets, matching Host behavior.
+   * @param sessionId - session to soft-delete.
+   * @param options - optional stopActivity flag (recorded; default mirror ignores it).
+   */
+  async deleteSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void> {
+    this.calls.push({ method: 'deleteSession', args: [sessionId, options] })
+    const stub = this.stubs.get('deleteSession')
+    if (stub !== undefined) {
+      await (stub(sessionId, options) as Promise<void>)
+      return
+    }
+    await this.update((draft) => {
+      draft.deletedSessionIds = [...draft.deletedSessionIds, sessionId]
+      draft.archivedSessionIds = draft.archivedSessionIds.filter(id => id !== sessionId)
+      draft.pinnedSessionIds = draft.pinnedSessionIds.filter(id => id !== sessionId)
     })
   }
 

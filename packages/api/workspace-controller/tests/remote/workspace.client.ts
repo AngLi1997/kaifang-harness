@@ -69,7 +69,7 @@ export function workspace(id: string, overrides: Partial<WorkspaceView> = {}): W
 export function baseline(...ids: readonly string[]): WorkspaceBaselineFrame {
   return {
     type: 'baseline',
-    value: { items: ids.map(id => workspace(id)), archivedSessionIds: [], pinnedSessionIds: [] },
+    value: { items: ids.map(id => workspace(id)), archivedSessionIds: [], pinnedSessionIds: [], deletedSessionIds: [] },
   }
 }
 
@@ -105,6 +105,7 @@ export const workspaceWorld: RemoteTable = {
     }),
     'workspace/archiveSession': (request: WorkspaceArchiveSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({ archivedSessionIds: [request.sessionId] }),
     'workspace/unarchiveSession': (_request: WorkspaceUnarchiveSessionRequest): RemoteResult<WorkspaceArchiveValue> => ok({ archivedSessionIds: [] }),
+    'workspace/deleteSession': (request: { sessionId: string; stopActivity?: boolean }): RemoteResult<{ deletedSessionIds: string[] }> => ok({ deletedSessionIds: [request.sessionId] }),
     'workspace/pinSession': (request: WorkspacePinSessionRequest): RemoteResult<WorkspacePinValue> => ok({ pinnedSessionIds: [request.sessionId] }),
     'workspace/unpinSession': (_request: WorkspaceUnpinSessionRequest): RemoteResult<WorkspacePinValue> => ok({ pinnedSessionIds: [] }),
   },

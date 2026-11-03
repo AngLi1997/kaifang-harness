@@ -12,6 +12,15 @@ function freshProgress(): OnboardingProgress {
   return { version: 1, step: 'welcome', purpose: null, process: null, completion: null, usage: 'compact', developerTools: false }
 }
 
+/**
+ * Desktop online Remote Client of the shared Web Host. DeepSeek account/watch is
+ * not granted to kaifang-user Peers; platform device ticket + shared settings are
+ * enough to enter the workspace without the local onboarding gate.
+ */
+function isSharedHostRemoteClient(): boolean {
+  return (globalThis as { __DSH_TRANSPORT__?: { ownsHost?: boolean } }).__DSH_TRANSPORT__?.ownsHost === false
+}
+
 /** Host-backed progress; completing writes active preferences before the durable done marker. */
 export class DesktopOnboardingController {
   /** Private observable projected into the shell overlay's framework hook. */
@@ -197,10 +206,13 @@ export class DesktopOnboardingController {
 
   private derive(): void {
     if (this.disposed) return
+    const remoteClient = isSharedHostRemoteClient()
     const host = this.progress.getSnapshot()
     const snapshot = this.account.getSnapshot()
     const account = snapshot.view
-    const signedIn = account?.status === 'credential-stored'
+    // Shared-Host Remote Client never receives DeepSeek account/watch; do not
+    // block workspace entry on that stream or on Desktop-local onboarding settings.
+    const signedIn = account?.status === 'credential-stored' || remoteClient
     const progress = this.draft ?? this.readProgress() ?? freshProgress()
     if (!signedIn) this.creditFunded = undefined
     else if (this.creditFunded === undefined && host.status === 'ready' && progress.step === 'credit') {
@@ -210,21 +222,24 @@ export class DesktopOnboardingController {
       this.failedWrite = undefined
       this.error = null
     }
-    const done = progress.step === 'done'
-    const unavailable = host.status === 'unavailable' || (host.status === 'ready' && !host.writable)
-    const readFailed = host.status === 'loading' && this.settings.getSnapshot().error !== null
-    const accountFailed = account === undefined && snapshot.failed
+    const done = progress.step === 'done' || remoteClient
+    const unavailable = !remoteClient
+      && (host.status === 'unavailable' || (host.status === 'ready' && !host.writable))
+    const readFailed = !remoteClient && host.status === 'loading' && this.settings.getSnapshot().error !== null
+    const accountFailed = !remoteClient && account === undefined && snapshot.failed
     const previous = this.state.getSnapshot()
     const next: DesktopOnboardingState = {
       progress: shallowEqual(previous.progress, progress) ? previous.progress : progress,
       creditFunded: this.creditFunded ?? false,
       visible: !done && signedIn && !unavailable,
-      status: this.completing || (this.saving && this.draft === undefined) ? 'saving' : unavailable || readFailed || accountFailed || this.error !== null ? 'error'
-        : host.status === 'loading' || account === undefined ? 'loading' : 'ready',
+      status: remoteClient ? 'ready'
+        : this.completing || (this.saving && this.draft === undefined) ? 'saving'
+          : unavailable || readFailed || accountFailed || this.error !== null ? 'error'
+            : host.status === 'loading' || account === undefined ? 'loading' : 'ready',
       error: unavailable || readFailed ? 'settings' : this.error,
     }
     if (!shallowEqual(previous, next)) this.state.set(next)
-    if (done || this.saving || this.completing || this.draft !== undefined || unavailable || host.status !== 'ready' || this.chat.getSnapshot().status !== 'ready'
+    if (remoteClient || done || this.saving || this.completing || this.draft !== undefined || unavailable || host.status !== 'ready' || this.chat.getSnapshot().status !== 'ready'
       || account?.status !== 'signed-out') return
     if (this.hasApiKey === true && this.error === null) {
       void this.save({ ...progress, step: 'done', process: 'standard', usage: 'detailed', developerTools: true, completion: 'api-key' }, true)

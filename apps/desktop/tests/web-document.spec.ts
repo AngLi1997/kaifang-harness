@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { authenticateWebHost, forwardWebRequest, serveWebDocument } from '../src/web-document.ts'
+import { authenticateWebHost, desktopFollowTransportAligned, desktopHasModelCredentials, exchangeSharedHostDeviceTicket, forwardWebRequest, isDesktopOwnedHostPath, resolveDesktopHostForward, serveWebDocument } from '../src/web-document.ts'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -85,4 +85,104 @@ it('refuses another page origin without forwarding its request', async () => {
   const response = await forwardWebRequest(new Request('dsh-app://app/api/read', { headers: { origin: 'https://other.example' } }), 'http://127.0.0.1:1234/', 'session=owned')
   expect(response.status).toBe(403)
   expect(fetch).not.toHaveBeenCalled()
+})
+
+it('exchanges Platform tokens for a shared Host device-ticket cookie', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    ok: true,
+    tokens: {
+      accessToken: 'access-2',
+      refreshToken: 'refresh-2',
+      expiresAt: 1_800_000_000_000,
+      scopes: ['model:invoke'],
+    },
+  }), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      'set-cookie': 'dsh_kaifang_auth_local=deviceSessionValue; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000',
+    },
+  }))
+  vi.stubGlobal('fetch', fetch)
+  const ticket = await exchangeSharedHostDeviceTicket('http://127.0.0.1:3080', {
+    accessToken: 'access',
+    refreshToken: 'refresh',
+    expiresAt: Date.now() + 60_000,
+    scopes: ['model:invoke'],
+  })
+  expect(ticket.cookie).toBe('dsh_kaifang_auth_local=deviceSessionValue')
+  expect(ticket.tokens).toEqual({
+    accessToken: 'access-2',
+    refreshToken: 'refresh-2',
+    expiresAt: 1_800_000_000_000,
+    scopes: ['model:invoke'],
+  })
+  const [target, init] = fetch.mock.calls[0] as [URL, RequestInit]
+  expect(target.href).toBe('http://127.0.0.1:3080/kaifang/auth/device')
+  expect(new Headers(init.headers).get('authorization')).toBe('Bearer access')
+  expect(JSON.parse(String(init.body))).toMatchObject({ accessToken: 'access', refreshToken: 'refresh' })
+})
+
+it('keeps plugin bundles on the owned Host while API traffic can target the shared Host', () => {
+  expect(isDesktopOwnedHostPath('/plugins/??a/client.js&rev=1')).toBe(true)
+  expect(isDesktopOwnedHostPath('/api/pluginInventory/list')).toBe(true)
+  expect(isDesktopOwnedHostPath('/api/pluginManager/listPlugins')).toBe(true)
+  expect(isDesktopOwnedHostPath('/api/workspace/follow')).toBe(false)
+  expect(isDesktopOwnedHostPath('/api/agentPresets/list')).toBe(false)
+  // Shared-Host Peer allowlist serves Settings → 权限 / Agent 预设 for Remote Client.
+  expect(isDesktopOwnedHostPath('/api/permissionPresets/catalog')).toBe(false)
+  expect(isDesktopOwnedHostPath('/kaifang/auth/status')).toBe(false)
+  const shared = resolveDesktopHostForward('/api/session/list', {
+    ownsHost: false,
+    activeHostUrl: 'http://127.0.0.1:3080/',
+    activeHostCookie: 'shared=1',
+    localHostUrl: 'http://127.0.0.1:9/',
+    localHostCookie: 'local=1',
+  })
+  expect(shared).toEqual({ hostUrl: 'http://127.0.0.1:3080/', hostCookie: 'shared=1' })
+  const plugins = resolveDesktopHostForward('/plugins/a/client.js', {
+    ownsHost: false,
+    activeHostUrl: 'http://127.0.0.1:3080/',
+    activeHostCookie: 'shared=1',
+    localHostUrl: 'http://127.0.0.1:9/',
+    localHostCookie: 'local=1',
+  })
+  expect(plugins).toEqual({ hostUrl: 'http://127.0.0.1:9/', hostCookie: 'local=1' })
+  const inventory = resolveDesktopHostForward('/api/pluginInventory/list', {
+    ownsHost: false,
+    activeHostUrl: 'http://127.0.0.1:3080/',
+    activeHostCookie: 'shared=1',
+    localHostUrl: 'http://127.0.0.1:9/',
+    localHostCookie: 'local=1',
+  })
+  expect(inventory).toEqual({ hostUrl: 'http://127.0.0.1:9/', hostCookie: 'local=1' })
+  expect(resolveDesktopHostForward('/plugins/a/client.js', {
+    ownsHost: false,
+    activeHostUrl: 'http://127.0.0.1:3080/',
+    activeHostCookie: 'shared=1',
+  })).toBeUndefined()
+})
+
+it('treats an online shared Host as model credentials without a local API key', () => {
+  expect(desktopHasModelCredentials({ sharedHostOnline: true, localHasApiKey: false })).toBe(true)
+  expect(desktopHasModelCredentials({ sharedHostOnline: false, localHasApiKey: true })).toBe(true)
+  expect(desktopHasModelCredentials({ sharedHostOnline: false, localHasApiKey: false })).toBe(false)
+})
+
+it('keeps Gateway follow streamBaseUrl on the same Host as /api forwarding', () => {
+  expect(desktopFollowTransportAligned({
+    ownsHost: false,
+    streamBaseUrl: 'http://127.0.0.1:3080',
+    activeHostUrl: 'http://127.0.0.1:3080/',
+  })).toBe(true)
+  expect(desktopFollowTransportAligned({
+    ownsHost: true,
+    streamBaseUrl: 'http://127.0.0.1:4123',
+    activeHostUrl: 'http://127.0.0.1:4123/?token=x',
+  })).toBe(true)
+  expect(desktopFollowTransportAligned({
+    ownsHost: false,
+    streamBaseUrl: 'http://127.0.0.1:3080',
+    activeHostUrl: 'http://127.0.0.1:4123/',
+  })).toBe(false)
 })

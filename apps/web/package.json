@@ -22,7 +22,7 @@
     "!dist/preview"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "node ./scripts/clean-dist.mjs && vite build",
     "dev": "vite",
     "watch": "vite build --watch --no-emptyOutDir",
     "build:preview": "pnpm --filter @deepseek-ai/dsh-experimental-webworker-runtime exec tsdown && pnpm --filter @deepseek-ai/dsh-experimental-webworker-packer exec tsdown && vite build && dsh-pack-vfs-image --out dist/preview/vfs-image.tar.gz",

@@ -47,9 +47,9 @@ Web bundle 当前写入源码的 `issuer` 和 `redirectUri` 面向本地 Kaifang
 
 Host 创建 state 与 PKCE verifier，将浏览器转到 IAM；本地授权 URL 与回调沿用当前主机名，Token issuer 仍使用配置值。回调时由 Host 服务端换取授权码，检查由已配置 issuer 返回的签名令牌声明，再读取 `/userinfo`。刷新令牌以 `grant` credential 保存，并在访问令牌过期前续期。浏览器只获得账号资料和 DSH Host 自身的 HttpOnly Cookie；本地同站开发用 Lax Cookie，跨站嵌入用 `SameSite=None; Secure; Partitioned`，并按顶层站点隔离。
 
-Admission Provider 位于 Connection admission 内，因此 `/api` 请求和 Gateway WebSocket 升级会按登录 Cookie 选择对应的 `kaifang-user` Peer。登录、回调、状态、取消和退出路由使用 Connection 的 Host/Origin 信任检查，但在平台登录前保持可访问。
+Admission Provider 位于 Connection admission 内，因此 `/api` 请求和 Gateway WebSocket 升级会按登录 Cookie（或 Desktop device ticket / 已准入会话的 Bearer）选择对应的 `kaifang-user` Peer。 Desktop 在已保存可用平台会话时于进入工作区前自动走 device ticket，以 Remote Client 挂共享 Host，无需先退出再登录。登录、回调、device、状态、取消和退出路由使用 Connection 的 Host/Origin 信任检查，但在平台登录前保持可访问。
 
-Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录、只读模型提供方目录、只读设置描述和用户根目录内的目录浏览。会话与工作区变更仍需匹配用户绑定；工作区创建、默认目录初始化和 Session 创建会在 Host 代码中再次限制到本人目录。
+Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录、只读模型提供方目录、只读设置描述和用户根目录内的目录浏览。会话与工作区变更仍需匹配用户绑定；工作区创建、默认目录初始化和 Session 创建会在 Host 代码中再次限制到本人目录。共享 Host 的 `kaifang-user` Peer 允许列表（`peer-roles.ts`）包含 `workspace/deleteSession`（软删除，与归档彼此独立），以便 Web 与 Desktop Remote Client 隐藏会话而不擦除日志。
 
 Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `sub` 与 `tid`，才能读取该用户的身份或访问令牌。访问令牌过期或退出后，该接口不再返回令牌。
 

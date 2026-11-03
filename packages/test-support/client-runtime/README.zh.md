@@ -124,7 +124,7 @@ test('registers into the sidebar', async ({ remote, start }) => {
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | `SlotTestRuntime` 组装、`TestRoot`、自动 frame、`mount`/`dispose` |
-| [`src/sessions.ts`](src/sessions.ts) + [`src/workspaces.ts`](src/workspaces.ts) | `ISessions`/`IWorkspaces` 测试替身与 `FixtureSession` 行为桩 |
+| [`src/sessions.ts`](src/sessions.ts) + [`src/workspaces.ts`](src/workspaces.ts) | `ISessions`/`IWorkspaces` 测试替身（含软删除 `deleteSession`）与 `FixtureSession` 行为桩 |
 | [`src/fixtures.ts`](src/fixtures.ts) | 普通 fixture 构造器：会话快照、workspace 列表状态 |
 | [`src/snapshot.ts`](src/snapshot.ts) | DOM 快照序列化器（类名哈希折叠、`<svg>` 指纹） |
 | [`src/access.ts`](src/access.ts) | `allowAllAccess` props、`StaticRemoteAccess`、`staticAccessPlugin` 与 `allowAllAccessPlugin`：remote-access Client 行的固定答案替身 |

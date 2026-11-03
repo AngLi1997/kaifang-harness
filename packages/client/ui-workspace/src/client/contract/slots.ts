@@ -403,6 +403,45 @@ export interface SessionArchiveConfirmInjected {
   stopAndArchiveSession: (sessionId: SessionId) => Promise<void>
 }
 
+/**
+ * Soft-delete menu share. 「删除会话」is distinct from archive: soft-deleted
+ * Sessions leave every browse filter while logs stay on disk.
+ */
+export interface DeleteSessionInjected {
+  hooks: {
+    /** Soft-deleted Session ids (menu absent for already soft-deleted rows). */
+    deleted: HostObservable<ReadonlySet<SessionId>>
+  }
+  /** Ask for the soft-delete confirmation dialog. */
+  requestSessionDelete: (sessionId: SessionId) => void
+}
+
+/** A Session soft-delete the menu asked for; the overlay dialog opens on it. */
+export interface SessionDeleteConfirmRequest {
+  /** Session to stop (if needed) and soft-delete out of every browse filter. */
+  sessionId: SessionId
+  /** The row's display title, named in the dialog. */
+  displayTitle: string
+}
+
+/**
+ * Soft-delete dialog share: pending confirmation, settlement, and the
+ * workspace/deleteSession hop (stopActivity) that hides the Session.
+ */
+export interface SessionDeleteConfirmInjected {
+  hooks: {
+    /** The confirmation asked for, until the dialog consumes or cancels it. */
+    deleteRequest: HostObservable<SessionDeleteConfirmRequest | null>
+  }
+  /** Consume or cancel the pending confirmation. */
+  settleSessionDelete: () => void
+  /**
+   * Soft-delete a Session after stopping running work. Resolves once the
+   * soft-delete set is durable. Logs remain on disk; archive is unchanged.
+   */
+  deleteSession: (sessionId: SessionId) => Promise<void>
+}
+
 /** Fork action share. */
 export interface ForkSessionInjected {
   /** Fork a Session at its last completed turn; the child arrives through the Host list. */
@@ -474,6 +513,13 @@ export type SessionArchiveConfirmProps =
   & PropsLocale<'workspace'>
   & Omit<SessionArchiveConfirmInjected, 'hooks'>
   & PropsHooks<SessionArchiveConfirmInjected['hooks']>
+
+/** Props of the delete-session dialog entry in `shell.overlay`. */
+export type SessionDeleteConfirmProps =
+  PropsRuntime<'shell.overlay'>
+  & PropsLocale<'workspace'>
+  & Omit<SessionDeleteConfirmInjected, 'hooks'>
+  & PropsHooks<SessionDeleteConfirmInjected['hooks']>
 
 /** Props of the existing overlay's keyed notice dispatcher. */
 export type RowToastProps =

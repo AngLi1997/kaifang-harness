@@ -351,6 +351,7 @@ describe('WorkspaceController follow', () => {
           workspaceIds: ['missing'],
           archivedSessionIds: [],
           pinnedSessionIds: [],
+          deletedSessionIds: [],
         },
       })
     }).toThrow('references missing Workspace "missing"')
@@ -381,7 +382,7 @@ describe('WorkspaceController follow', () => {
     const iterator = controller.follow(abort.signal)[Symbol.asyncIterator]()
     await expect(nextFrame(iterator)).resolves.toEqual({
       type: 'baseline',
-      value: { items: [], archivedSessionIds: [], pinnedSessionIds: [] },
+      value: { items: [], archivedSessionIds: [], pinnedSessionIds: [], deletedSessionIds: [] },
     })
 
     const first = await controller.create({ path: stageDir(root, 'first') })
@@ -447,7 +448,6 @@ describe('WorkspaceController follow', () => {
 
   it('follows only the Workspaces and Sessions a non-owner may follow', async () => {
     const { controller, ctx, root } = await harness()
-    // oxlint-disable-next-line typescript/unbound-method -- the assertion inspects the spy and never calls it.
     expect(ctx.typert.resources.register).toHaveBeenCalledWith('workspace', { field: 'workspaceId' })
     const shown = await controller.create({ path: stageDir(root, 'shown') })
     const hiddenWorkspace = await controller.create({ path: stageDir(root, 'hidden') })
@@ -477,6 +477,7 @@ describe('WorkspaceController follow', () => {
         items: [expect.objectContaining({ workspaceId: shownId, sessionIds: [shared.id] })],
         archivedSessionIds: [],
         pinnedSessionIds: [shared.id],
+        deletedSessionIds: [],
       },
     })
 

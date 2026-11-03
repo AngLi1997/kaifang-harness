@@ -14,6 +14,8 @@ import { RemoteError, principalOf, remoteErrorOf } from '@deepseek-ai/dsh-typert
 import { workspaceView } from './feed.ts'
 import type {
   WorkspaceArchiveSessionRequest,
+  WorkspaceDeleteSessionValue,
+  WorkspaceDeleteSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
@@ -92,11 +94,29 @@ export class WorkspaceCommands {
 
   /**
    * Delete one Workspace registration without deleting its directory or Sessions.
+   * Ownership for a shared multi-user Host is resolved inside the queue so a
+   * concurrent rename cannot leapfrog an in-flight delete that still awaits
+   * platform partition setup before enqueueing.
    * @param request - Workspace identity to remove.
+   * @param ownerIdOf - optional async owner id; when set, delete refuses a
+   *   Workspace the caller does not own (as `workspace/not-found`).
    * @returns deletion confirmation.
    */
-  delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
+  delete(
+    request: WorkspaceDeleteRequest,
+    ownerIdOf?: () => Promise<string | undefined>,
+  ): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
+      if (ownerIdOf !== undefined) {
+        const ownerId = await ownerIdOf()
+        if (ownerId !== undefined) {
+          const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(request.workspaceId))
+          if (workspace === undefined || workspace.ownerId !== ownerId) {
+            throw workspaceNotFound(request.workspaceId)
+          }
+          // Sessions stay on disk and become Ungrouped when registration drops.
+        }
+      }
       if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }
@@ -194,6 +214,35 @@ export class WorkspaceCommands {
   async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds]
+      .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) }
+  }
+
+  /**
+   * Soft-delete one Session (UI hide; logs retained). Distinct from archive.
+   * @param request - Session identity and whether to stop its work.
+   * @returns the complete resulting soft-delete set.
+   */
+  async deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteSessionValue> {
+    try {
+      await this.ctx.workspaceRegistry.deleteSession(
+        request.sessionId,
+        request.stopActivity === true ? { stopActivity: true } : {},
+      )
+    } catch (error) {
+      if (error instanceof WorkspaceUnknownSessionError) {
+        throw new RemoteError('session/not-found', error.message, { sessionId: request.sessionId }, { cause: error })
+      }
+      if (error instanceof WorkspaceActiveSessionError) {
+        throw new RemoteError(
+          'workspace/session-active',
+          error.message,
+          { sessionId: request.sessionId, activity: error.activity },
+          { cause: error },
+        )
+      }
+      throw error
+    }
+    return { deletedSessionIds: [...this.ctx.workspaceRegistry.deletedSessionIds]
       .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) }
   }
 

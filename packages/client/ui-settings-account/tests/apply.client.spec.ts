@@ -89,6 +89,16 @@ withoutAccountAccess('opens no account stream and registers no account surface w
   expect(c.ctx.slots.entries('settings.section').some(entry => entry.options.id === 'account')).toBe(false)
 }, 60_000)
 
+withoutAccountAccess('keeps the Desktop settings launcher without account/watch so online Remote Client chrome stays', async ({ start }) => {
+  vi.stubGlobal('dshDesktop', {})
+  const c = await start()
+  expect(c.mock.streams.end('account/watch')).toBe(0)
+  expect(c.ctx.slots.entries('settings.launcher')).toHaveLength(1)
+  expect(quotaNoticeEntry(c)).toBeUndefined()
+  expect(c.ctx.slots.entries('settings.models.sign-in')).toHaveLength(0)
+  expect(c.ctx.slots.entries('settings.section').some(entry => entry.options.id === 'account')).toBe(false)
+}, 60_000)
+
 it('claims account balance notices from the frame-wide quota chain and declines generic quota', async ({ start }) => {
   vi.stubGlobal('dshDesktop', {})
   const c = await start()

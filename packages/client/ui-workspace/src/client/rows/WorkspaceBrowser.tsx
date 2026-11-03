@@ -822,6 +822,7 @@ function SearchResults({
   onUnarchive,
   workspaces,
   archivedSessionIds,
+  deletedSessionIds,
   archivedFilter,
   query,
   remote,
@@ -832,6 +833,7 @@ function SearchResults({
 }: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'useSessionAccess'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
+  deletedSessionIds: readonly SessionNode['id'][]
   /** Search matches follow the archived filter selected for the list. */
   archivedFilter: ArchivedFilter
   /** Unarchive an archived result row in place. */
@@ -856,8 +858,9 @@ function SearchResults({
       statuses,
       currentRemote,
       resultLimit,
+      deletedSessionIds,
     ),
-    [list, workspaces, query, archivedSessionIds, archivedFilter, statuses, currentRemote, resultLimit],
+    [list, workspaces, query, archivedSessionIds, archivedFilter, statuses, currentRemote, resultLimit, deletedSessionIds],
   )
   const pending = currentRemote.status === 'loading'
   const currentId = panelActive
@@ -970,6 +973,7 @@ export function WorkspaceBrowser({
   const workspacePhase = useWorkspaces(state => state.phase)
   const workspaceStreamState = useWorkspaces(state => state.state)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
+  const deletedSessionIds = useWorkspaces(state => state.deletedSessionIds)
   const pinnedSessionIds = useWorkspaces(state => state.pinnedSessionIds)
   // Live occupancy of this surface's directory-flow hole (the same source the
   // flow reads): a composition without a picking affordance can add nothing.
@@ -1002,8 +1006,8 @@ export function WorkspaceBrowser({
     return list.ids.filter(id => list.byId[id] !== undefined && !accounted.has(id))
   }, [list, workspaces])
   const orderState = useMemo(
-    () => ({ pinnedSessionIds, archivedSessionIds }),
-    [archivedSessionIds, pinnedSessionIds],
+    () => ({ pinnedSessionIds, archivedSessionIds, deletedSessionIds }),
+    [archivedSessionIds, deletedSessionIds, pinnedSessionIds],
   )
   const rowState = useMemo<SessionRowState>(
     () => ({ ...orderState, archivedFilter }),
@@ -1297,7 +1301,7 @@ export function WorkspaceBrowser({
       : workspaces.find(workspace => workspace.workspaceId === clearTarget.workspaceId)?.sessionIds ?? []
   ).filter((id) => {
     const session = list.byId[id]
-    return session !== undefined && !session.blank && !archivedSessionIds.includes(id)
+    return session !== undefined && !session.blank && !archivedSessionIds.includes(id) && !deletedSessionIds.includes(id)
   })
   const closeClear = () => {
     if (clearing) return
@@ -1466,6 +1470,7 @@ export function WorkspaceBrowser({
               onUnarchive={onSessionUnarchive}
               workspaces={workspaces}
               archivedSessionIds={archivedSessionIds}
+              deletedSessionIds={deletedSessionIds}
               archivedFilter={archivedFilter}
               query={normalizedQuery}
               remote={remoteSearch}

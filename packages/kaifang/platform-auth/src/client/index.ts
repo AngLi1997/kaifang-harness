@@ -31,9 +31,11 @@ export function apply(ctx: ClientContext): void {
   let redirecting = false
   const checkLogin = async (): Promise<void> => {
     if (redirecting) return
-    // Desktop boots with ownsHost and uses local owner auth, not shared-host IAM.
+    // Desktop owns platform admission (local Host or shared-Host device ticket).
+    // Never bounce the native shell into the Host browser IAM entry page.
     const transport = (globalThis as { __DSH_TRANSPORT__?: { ownsHost?: boolean } }).__DSH_TRANSPORT__
     if (transport?.ownsHost === true) return
+    if ((globalThis as { dshDesktopBoot?: unknown }).dshDesktopBoot !== undefined) return
     try {
       const response = await fetch('/kaifang/auth/status', { headers: { accept: 'application/json' } })
       if (!response.ok) return
@@ -82,6 +84,14 @@ export function apply(ctx: ClientContext): void {
     const disposers = [ctx.on('connection/reset', refresh)]
     return () => { for (const dispose of disposers) dispose() }
   }, 'kaifang-platform-auth: model catalog refresh')
+  // Desktop Remote Client: warm the shared-Host platform catalog without waiting for Settings.
+  {
+    const transport = (globalThis as { __DSH_TRANSPORT__?: { ownsHost?: boolean } }).__DSH_TRANSPORT__
+    if ((globalThis as { dshDesktopBoot?: unknown }).dshDesktopBoot !== undefined && transport?.ownsHost === false) {
+      void loadCatalog()
+      ctx.effect(() => ctx.on('connection/reset', () => { void loadCatalog() }), 'kaifang-platform-auth: desktop shared catalog')
+    }
+  }
   ctx.slots.inject('settings.models.footer', () => ctx.slots.register({
     name: 'settings.models.footer',
     id: 'kaifang-platform-models',

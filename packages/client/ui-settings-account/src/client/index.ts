@@ -402,9 +402,15 @@ export function apply(ctx: Context): void {
       }),
     }, AccountPlatformHost))
   }
-  ctx.remoteAccess.whenAccess('account/watch', () => ctx.slots.inject('settings.launcher', () => ctx.slots.register({
+  // Desktop keeps the bottom-left account/settings launcher even as a shared-Host
+  // Remote Client (kaifang-user Peers lack account/watch). DeepSeek account/watch
+  // stream, models sign-in, quota notice, and credential AccountSection stay gated
+  // so online mode does not reintroduce the onboarding hang.
+  const injectSettingsLauncher = (): (() => void) => ctx.slots.inject('settings.launcher', () => ctx.slots.register({
     name: 'settings.launcher', locale: 'settings.account', inject: () => operations,
-  }, AccountMenu)))
+  }, AccountMenu))
+  if (desktop) ctx.effect(() => injectSettingsLauncher(), 'account: desktop settings launcher')
+  else ctx.remoteAccess.whenAccess('account/watch', injectSettingsLauncher)
   ctx.remoteAccess.whenAccess('account/watch', () => ctx.slots.inject('settings.section', () => {
     let unregister: (() => void) | undefined
     const update = () => {
