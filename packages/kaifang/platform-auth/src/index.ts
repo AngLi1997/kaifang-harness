@@ -811,6 +811,10 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
     })
     const provider: ConnectionAdmissionProvider = (request) => {
       if (!enabled) return undefined
+      // Desktop profile runs the same Web Host but does not require platform authentication:
+      // local settings and credential reads must succeed before the user completes platform login.
+      // ELECTRON_RUN_AS_NODE distinguishes Desktop's Node-mode Host from the Web profile.
+      if (process.env.ELECTRON_RUN_AS_NODE === '1') return undefined
       for (const [sessionId, peer] of peers) {
         if (!auth.hasLiveSession(sessionId)) {
           peers.delete(sessionId)

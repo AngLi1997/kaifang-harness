@@ -302,7 +302,9 @@ export class SessionController extends TypertRemoteService {
   @Remote('selectModel')
   selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
     const principal = principalOf(this.ctx.invocation)
-    if (isKaifangUserPrincipal(principal)
+    // Desktop profile allows native DSH models; only Web profile forces platform models.
+    const isDesktop = process.env.ELECTRON_RUN_AS_NODE === '1'
+    if (!isDesktop && isKaifangUserPrincipal(principal)
       && request.provider !== this.ctx.kaifangPlatformAuth.ensureModelProvider(principal)) {
       throw new RemoteError('session/model-unavailable', '只能选择当前账号有权限的平台模型', {
         provider: request.provider, model: request.model,
@@ -337,7 +339,9 @@ export class SessionController extends TypertRemoteService {
   @Remote('modelCatalog')
   async modelCatalog(): Promise<ModelCatalog> {
     const principal = principalOf(this.ctx.invocation)
-    if (!isKaifangUserPrincipal(principal)) return buildModelCatalog(this.ctx)
+    // Desktop profile shows all configured models; only Web profile filters to platform models.
+    const isDesktop = process.env.ELECTRON_RUN_AS_NODE === '1'
+    if (!isKaifangUserPrincipal(principal) || isDesktop) return buildModelCatalog(this.ctx)
     const provider = this.ctx.kaifangPlatformAuth.ensureModelProvider(principal)
     const model = (await this.ctx.llm.listModels(provider))[0]
     const selection = model === undefined ? { provider, model: 'unavailable' } : { provider, model: model.id }
