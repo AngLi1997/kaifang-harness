@@ -135,8 +135,41 @@ async function probeSharedHost(
 }
 
 /**
+ * Follow Platform `/harness` when the portal issues an HTTP redirect to the
+ * shared Web Host (production nginx / gateway). SPA-only client redirects do
+ * not yield a Location; callers still have env, saved hostUrl, and loopback.
+ */
+export async function discoverHostFromPlatformHarness(
+  platformOrigin: string,
+  send: (input: string, init?: RequestInit) => Promise<Response>,
+): Promise<string | undefined> {
+  const platform = validateSharedHarnessUrl(platformOrigin)
+  if (platform === undefined) return undefined
+  const entry = sharedHarnessEntryUrl(platform)
+  try {
+    const response = await send(entry, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(3_000),
+      headers: { accept: 'text/html,application/json;q=0.9,*/*;q=0.8' },
+    })
+    const location = response.headers.get('location')
+    if (location === null || location === '') return undefined
+    let candidate: URL
+    try { candidate = new URL(location, entry) } catch { return undefined }
+    const hostUrl = validateSharedHostUrl(candidate.origin)
+    if (hostUrl === undefined) return undefined
+    return await probeSharedHost(hostUrl, send)
+  } catch (error) {
+    console.warn('desktop shared Harness: Platform /harness discovery failed', platform, error)
+    return undefined
+  }
+}
+
+/**
  * Resolve the shared Web Host Desktop should use while online.
- * Prefer env, then saved hostUrl, then a loopback probe for local debug.
+ * Prefer `DSH_SHARED_HOST_URL`, then saved hostUrl, then Platform `/harness`
+ * HTTP redirect, then a loopback `:3080` probe for local debug.
  */
 export async function discoverSharedHostUrl(
   userData: string,
@@ -156,6 +189,11 @@ export async function discoverSharedHostUrl(
   if (saved !== '') {
     const live = await probeSharedHost(saved, send)
     if (live !== undefined) return live
+  }
+  const fromHarness = await discoverHostFromPlatformHarness(platformOrigin, send)
+  if (fromHarness !== undefined) {
+    await saveSharedHostUrl(userData, fromHarness)
+    return fromHarness
   }
   const platform = validateSharedHarnessUrl(platformOrigin)
   if (platform === undefined) return undefined

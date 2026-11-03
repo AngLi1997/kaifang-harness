@@ -37,7 +37,13 @@ import { desktopUpdateChannel } from './update-channel.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
 import { prepareDesktopUpdateWindow } from './update-window.ts'
 import { DesktopCommandManager } from './command-management.ts'
-import { serveWebDocument, authenticateWebHost, exchangeSharedHostDeviceTicket, forwardWebRequest, resolveDesktopHostForward, desktopHasModelCredentials, desktopFollowTransportAligned } from './web-document.ts'
+import { serveWebDocument, authenticateWebHost, forwardWebRequest, resolveDesktopHostForward, desktopHasModelCredentials, desktopFollowTransportAligned } from './web-document.ts'
+import {
+  attachSharedHostRemoteClient,
+  desktopBootTransport,
+  shouldNotifySharedHostAttachFailure,
+  type SharedHostAttachResult,
+} from './shared-host-attach.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
@@ -56,7 +62,7 @@ import { desktopClientMetadata, desktopClientVersion } from './client-metadata.t
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
 import { readDesktopSettings } from './settings.ts'
-import { createSharedHarnessWindow, discoverSharedHostUrl, readSharedHarnessUrl, saveSharedHarnessUrl, sharedHarnessEntryUrl } from './shared-harness.ts'
+import { createSharedHarnessWindow, readSharedHarnessUrl, saveSharedHarnessUrl, sharedHarnessEntryUrl } from './shared-harness.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -458,64 +464,83 @@ async function main(): Promise<void> {
   /**
    * When Platform login is available and the shared Host is reachable, point the
    * native shell at that Host as a kaifang-user Peer (device ticket cookie).
-   * Offline / unreachable Host keeps the owned local Desktop Host.
+   * Offline / unreachable Host keeps the owned local Desktop Host; callers that
+   * enter the workspace while signed-in must surface a visible failure notice.
    */
-  const activateSharedHostIfPossible = async (): Promise<boolean> => {
-    if (localHostUrl === undefined || localHostCookie === undefined) return false
+  const activateSharedHostIfPossible = async (): Promise<SharedHostAttachResult> => {
+    if (localHostUrl === undefined || localHostCookie === undefined) {
+      return { ok: false, reason: 'host-unreachable', detail: 'local Desktop Host is not ready' }
+    }
     const userData = app.getPath('userData')
     const platformOrigin = await readSharedHarnessUrl(userData)
-    if (platformOrigin === '') {
-      useLocalHostTransport()
-      return false
-    }
-    let session = await readPlatformSession(userData, platformOrigin, Date.now())
-    if (session === undefined) {
-      useLocalHostTransport()
-      return false
-    }
+    let session = platformOrigin === ''
+      ? undefined
+      : await readPlatformSession(userData, platformOrigin, Date.now())
     // Prefer a local refresh when near expiry, but do not abandon shared-Host
     // activation when refresh fails while the access token is still usable —
     // Host device admission can refresh via refresh_token itself.
-    if (session.expiresAt <= Date.now() + 60_000 && session.refreshToken !== '') {
+    if (session !== undefined && session.expiresAt <= Date.now() + 60_000 && session.refreshToken !== '') {
       try {
         session = await refreshPlatformSession(session, (input, init) => fetch(input, init))
         await writePlatformSession(userData, session)
       } catch (error) {
         if (session.expiresAt <= Date.now()) {
-          console.warn('desktop shared Host: platform session expired and refresh failed; staying on local Host', error)
-          // Fall through to device ticket anyway: Host may still refresh.
+          console.warn('desktop shared Host: platform session expired and refresh failed; trying device ticket anyway', error)
         } else {
           console.warn('desktop shared Host: local refresh failed; trying device ticket with current access token', error)
         }
       }
     }
-    const sharedOrigin = await discoverSharedHostUrl(userData, platformOrigin, (input, init) => fetch(input, init))
-    if (sharedOrigin === undefined) {
+    const result = await attachSharedHostRemoteClient({
+      userData,
+      platformOrigin,
+      session: session === undefined
+        ? undefined
+        : {
+          accessToken: session.accessToken,
+          refreshToken: session.refreshToken,
+          expiresAt: session.expiresAt,
+          scopes: session.scopes,
+        },
+    })
+    if (!result.ok) {
       useLocalHostTransport()
-      return false
-    }
-    try {
-      const ticket = await exchangeSharedHostDeviceTicket(sharedOrigin, session)
-      if (ticket.tokens !== undefined) {
-        session = {
-          ...session,
-          accessToken: ticket.tokens.accessToken,
-          refreshToken: ticket.tokens.refreshToken,
-          expiresAt: ticket.tokens.expiresAt,
-          scopes: ticket.tokens.scopes,
-        }
-        await writePlatformSession(userData, session)
+      if (result.reason !== 'no-platform' && result.reason !== 'no-session') {
+        console.warn('desktop shared Host: attach failed; staying on local Host', result.reason, result.detail)
       }
-      hostUrl = `${sharedOrigin}/`
-      hostCookie = ticket.cookie
-      ownsHostTransport = false
-      console.info('desktop shared Host: native shell connected as Remote Client', sharedOrigin)
-      return true
-    } catch (error) {
-      console.warn('desktop shared Host: device ticket failed; staying on local Host', error)
-      useLocalHostTransport()
-      return false
+      return result
     }
+    if (result.tokens !== undefined && session !== undefined) {
+      session = {
+        ...session,
+        accessToken: result.tokens.accessToken,
+        refreshToken: result.tokens.refreshToken,
+        expiresAt: result.tokens.expiresAt,
+        scopes: result.tokens.scopes,
+      }
+      await writePlatformSession(userData, session)
+    }
+    hostUrl = result.hostUrl
+    hostCookie = result.cookie
+    ownsHostTransport = false
+    console.info('desktop shared Host: native shell connected as Remote Client', new URL(result.hostUrl).origin)
+    return result
+  }
+  const notifySharedHostAttachFailure = async (result: SharedHostAttachResult): Promise<void> => {
+    if (!shouldNotifySharedHostAttachFailure(true, result)) return
+    const message = result.ok
+      ? ''
+      : result.reason === 'device-ticket-failed'
+        ? locale.messages.sharedHostOfflineTicketFailed
+        : locale.messages.sharedHostOfflineUnreachable
+    await ordinaryMessageBox({
+      type: 'warning',
+      title: locale.messages.sharedHostOfflineTitle,
+      message,
+      buttons: [locale.messages.updateAcknowledge],
+      cancelId: 0,
+      defaultId: 0,
+    })
   }
   const browserGuests = new DesktopBrowserGuests(() => hostUrl)
   let injections: readonly unknown[] = []
@@ -852,18 +877,21 @@ async function main(): Promise<void> {
     assertDesktopSender(event, ['app'])
     await startup
     if (backend.host === undefined || hostUrl === undefined) throw new Error('Desktop Host is unavailable')
-    const streamBaseUrl = new URL(hostUrl).origin
-    if (!desktopFollowTransportAligned({
+    const transport = desktopBootTransport({
       ownsHost: ownsHostTransport,
-      streamBaseUrl,
+      activeHostUrl: hostUrl,
+    })
+    if (!desktopFollowTransportAligned({
+      ownsHost: transport.ownsHost,
+      streamBaseUrl: transport.streamBaseUrl,
       activeHostUrl: hostUrl,
     })) {
       throw new Error('dsh desktop: follow streamBaseUrl is not aligned with the active Host')
     }
     return {
       injections,
-      streamBaseUrl,
-      ownsHost: ownsHostTransport,
+      streamBaseUrl: transport.streamBaseUrl,
+      ownsHost: transport.ownsHost,
     }
   })
 
@@ -1329,8 +1357,8 @@ async function main(): Promise<void> {
     let switchedToSharedHost = false
     if (ownsHostTransport) {
       const attached = await activateSharedHostIfPossible()
-      switchedToSharedHost = attached
-      if (!attached) {
+      switchedToSharedHost = attached.ok
+      if (!attached.ok) {
         const platformOrigin = await readSharedHarnessUrl(app.getPath('userData'))
         const session = platformOrigin === ''
           ? undefined
@@ -1340,6 +1368,8 @@ async function main(): Promise<void> {
           await showPlatformSignIn()
           return
         }
+        // Signed-in but still on local Host: never look "online" without saying so.
+        if (session !== undefined) await notifySharedHostAttachFailure(attached)
       }
     }
     const window = mainWindow ?? createMainWindow()

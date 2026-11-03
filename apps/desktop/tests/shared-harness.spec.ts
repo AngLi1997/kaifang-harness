@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 vi.mock('electron', () => ({ BrowserWindow: vi.fn(), shell: { openExternal: vi.fn() } }))
-const { discoverSharedHostUrl, readSharedHarnessUrl, readSharedHostUrl, saveSharedHarnessUrl, sharedHarnessEntryUrl, validateSharedHarnessUrl, validateSharedHostUrl } = await import('../src/shared-harness.ts')
+const { discoverHostFromPlatformHarness, discoverSharedHostUrl, readSharedHarnessUrl, readSharedHostUrl, saveSharedHarnessUrl, sharedHarnessEntryUrl, validateSharedHarnessUrl, validateSharedHostUrl } = await import('../src/shared-harness.ts')
 
 afterEach(() => { vi.unstubAllEnvs() })
 
@@ -54,6 +54,52 @@ it('discovers and remembers a loopback shared Host beside the Platform origin', 
     expect(send).toHaveBeenCalled()
     expect(await readSharedHostUrl(userData)).toBe('http://127.0.0.1:3080')
     expect(await readSharedHarnessUrl(userData)).toBe('http://127.0.0.1:3001')
+  } finally {
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+it('discovers a shared Host from Platform /harness HTTP redirects', async () => {
+  const userData = await mkdtemp(join(tmpdir(), 'dsh-harness-redirect-'))
+  try {
+    await saveSharedHarnessUrl(userData, 'https://platform.example')
+    const send = vi.fn(async (input: string) => {
+      if (String(input).endsWith('/harness')) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://harness.example/' },
+        })
+      }
+      if (String(input).includes('/kaifang/auth/status')) {
+        return new Response(JSON.stringify({ configured: true, account: null }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(null, { status: 404 })
+    })
+    expect(await discoverHostFromPlatformHarness('https://platform.example', send)).toBe('https://harness.example')
+    expect(await discoverSharedHostUrl(userData, 'https://platform.example', send, {})).toBe('https://harness.example')
+    expect(await readSharedHostUrl(userData)).toBe('https://harness.example')
+  } finally {
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+it('prefers DSH_SHARED_HOST_URL when the env Host probes healthy', async () => {
+  const userData = await mkdtemp(join(tmpdir(), 'dsh-shared-host-env-'))
+  try {
+    const send = vi.fn().mockResolvedValue(new Response(JSON.stringify({ configured: true, account: null }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    expect(await discoverSharedHostUrl(
+      userData,
+      'https://platform.example',
+      send,
+      { DSH_SHARED_HOST_URL: 'https://harness-from-env.example' },
+    )).toBe('https://harness-from-env.example')
+    expect(String(send.mock.calls[0]?.[0])).toContain('https://harness-from-env.example')
   } finally {
     await rm(userData, { recursive: true, force: true })
   }
