@@ -29,7 +29,7 @@ import { installDesktopFileDrag } from './file-drag.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
-import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
+import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState, type KaifangAccountView } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
@@ -41,7 +41,9 @@ import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
-import { needsWelcome, type PlatformPasswordCredentials, type PlatformPasswordSignInResult } from './welcome-api.ts'
+import { needsWelcome, type PlatformBrowserSignInResult, type PlatformPasswordCredentials, type PlatformPasswordSignInResult } from './welcome-api.ts'
+import { PlatformBrowserSignIn, refreshPlatformSession } from './platform-browser-sign-in.ts'
+import { clearPlatformSession, hasPlatformSession, readPlatformSession, writePlatformSession, type PlatformSession, type PlatformSessionUser } from './platform-session.ts'
 import { connectDesktopWelcome, type DesktopWelcomeBackend } from './welcome-backend.ts'
 import { DesktopUpdateJournal } from './update-journal.ts'
 import { DesktopUpdatePreparationError } from './update-error.ts'
@@ -54,7 +56,7 @@ import { desktopClientMetadata, desktopClientVersion } from './client-metadata.t
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
 import { readDesktopSettings } from './settings.ts'
-import { createSharedHarnessWindow, readSharedHarnessUrl, saveSharedHarnessUrl, sharedHarnessEntryUrl, SHARED_HARNESS_SESSION_PARTITION } from './shared-harness.ts'
+import { createSharedHarnessWindow, readSharedHarnessUrl, saveSharedHarnessUrl, sharedHarnessEntryUrl } from './shared-harness.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -90,6 +92,23 @@ app.setAppLogsPath()
 
 function currentDesktopLocale(): ReturnType<typeof resolveDesktopLocale> {
   return resolveDesktopLocale(windowsLanguage ?? app.getLocale())
+}
+
+
+async function clearLoopbackHostAuthCookies(): Promise<void> {
+  try {
+    const cookieStore = session.defaultSession?.cookies
+    if (cookieStore === undefined) return
+    const targets = ['http://127.0.0.1', 'http://localhost']
+    for (const url of targets) {
+      const cookies = await cookieStore.get({ url })
+      await Promise.all(cookies
+        .filter(cookie => cookie.name.startsWith('dsh-auth-'))
+        .map(async (cookie) => { await cookieStore.remove(url, cookie.name) }))
+    }
+  } catch (error) {
+    console.warn('desktop auth: could not clear oversized loopback Host cookies', error)
+  }
 }
 
 async function removeLegacyKaifangCredentials(userData: string): Promise<void> {
@@ -313,7 +332,7 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
 }
 
 async function main(): Promise<void> {
-  await removeLegacyKaifangCredentials(app.getPath('userData'))
+  await Promise.all([removeLegacyKaifangCredentials(app.getPath('userData')), clearLoopbackHostAuthCookies()])
   const desktopSettings = readDesktopSettings(app.getPath('userData'))
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
@@ -366,6 +385,8 @@ async function main(): Promise<void> {
     if (failure?.status === 'rejected') throw failure.reason
   }
   let enteredWorkspace = false
+  /** Platform account published to the workspace AccountMenu via dshDesktop.kaifang. */
+  let platformAccount: KaifangAccountView | undefined
   // NSIS passes --updated when it launches the application after installation.
   let raiseAfterUpdate = process.platform === 'win32' && process.argv.includes('--updated')
   let shellInstallerOwnsQuit = false
@@ -594,7 +615,22 @@ async function main(): Promise<void> {
 
   const readWelcomeState = async () => {
     if (backend.host === undefined || welcomeBackend === undefined) throw new Error('desktop welcome: backend unavailable')
-    return welcomeBackend.read()
+    const state = await welcomeBackend.read()
+    const platformOrigin = await readSharedHarnessUrl(app.getPath('userData'))
+    let platformSignedIn = await hasPlatformSession(app.getPath('userData'), platformOrigin, Date.now())
+    if (platformSignedIn) {
+      const current = await readPlatformSession(app.getPath('userData'), platformOrigin, Date.now())
+      if (current !== undefined && current.expiresAt <= Date.now() + 60_000) {
+        try {
+          const refreshed = await refreshPlatformSession(current, (input, init) => fetch(input, init))
+          await writePlatformSession(app.getPath('userData'), refreshed)
+        } catch (error) {
+          console.warn('desktop platform: could not refresh the stored session', error)
+          platformSignedIn = false
+        }
+      }
+    }
+    return { ...state, platformSignedIn }
   }
   stopForRecovery = () => backend.close()
 
@@ -997,10 +1033,13 @@ async function main(): Promise<void> {
     : []
   const applicationItems = (): MenuItemConstructorOptions[] => [
     { label: currentDesktopLocale().messages.openApplication, click: () => {
+      focusPrimaryWindow()
+    } },
+    { label: currentDesktopLocale().messages.sharedHarnessSettingsMenu, click: () => { void showSharedHarnessSettings() } },
+    { label: currentDesktopLocale().messages.openSharedHarnessMenu, click: () => {
       void openSharedHarness().then((opened) => { if (!opened) return showSharedHarnessSettings() })
         .catch((error: unknown) => { console.error(error) })
     } },
-    { label: currentDesktopLocale().messages.sharedHarnessSettingsMenu, click: () => { void showSharedHarnessSettings() } },
     { label: currentDesktopLocale().messages.openLocalWorkspaceMenu, click: () => {
       void (backend.state.phase === 'ready' ? enterWorkspace() : reconcileBackend().then(() => enterWorkspace()))
         .catch((error: unknown) => { reportFatal(error, 'main') })
@@ -1013,6 +1052,8 @@ async function main(): Promise<void> {
         click: () => { void showAbout().catch((error: unknown) => { console.error(error) }) } }
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
+    ...platformAccount !== undefined ? [{ label: currentDesktopLocale().messages.kaifangSignOutMenu, click: requestPlatformSignOut },
+      { type: 'separator' as const }] : [],
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
     ...process.platform === 'darwin' || process.platform === 'win32'
       ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
@@ -1181,11 +1222,12 @@ async function main(): Promise<void> {
     enteredWorkspace = true
     sharedHarnessActive = false
     if (sharedHarnessWindow !== undefined && !sharedHarnessWindow.isDestroyed()) sharedHarnessWindow.destroy()
-    if (welcomeWindow !== undefined) {
-      welcomeWindow.close()
-      window.webContents.send(DESKTOP_IPC.enterWorkspace)
-    }
+    const welcome = welcomeWindow
     welcomeWindow = undefined
+    if (welcome !== undefined && !welcome.isDestroyed()) {
+      welcome.close()
+    }
+    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.enterWorkspace)
     if (raiseAfterUpdate) {
       raiseAfterUpdate = false
       window.moveTop()
@@ -1228,42 +1270,143 @@ async function main(): Promise<void> {
     if (window.isMinimized()) window.restore()
     window.show()
     window.focus()
-    enteredWorkspace = true
+    // Keep this optional shared Web surface secondary; native workspace remains the post-login shell.
     sharedHarnessActive = true
-    if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.close()
-    welcomeWindow = undefined
-    if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.hide()
     return true
   }
+  // Use undici fetch — not Electron net.fetch — so defaultSession's many loopback
+  // `dsh-auth-*` cookies are not attached (APISIX returns 400 Cookie Too Large).
+  const platformSend = (input: string, init?: RequestInit): Promise<Response> => fetch(input, init)
+  const platformBrowser = new PlatformBrowserSignIn({
+    ttlMs: 600_000,
+    send: platformSend,
+    openBrowser: (url) => {
+      void shell.openExternal(url).catch((error: unknown) => {
+        console.warn('desktop platform: could not open the system browser', error)
+      })
+    },
+    callbackPage: (outcome) => {
+      const title = outcome === 'succeeded' ? locale.messages.welcomeAuthExchanging
+        : outcome === 'cancelled' ? locale.messages.welcomeAuthCancel : locale.messages.welcomeAuthFailed
+      const body = outcome === 'succeeded'
+        ? (locale.id.startsWith('zh') ? '登录成功，请返回 KaifangHarness 桌面端。' : 'Sign-in complete. You can return to KaifangHarness Desktop.')
+        : outcome === 'cancelled'
+          ? (locale.id.startsWith('zh') ? '已取消登录。' : 'Sign-in was cancelled.')
+          : (locale.id.startsWith('zh') ? '登录失败，请返回桌面端重试。' : 'Sign-in failed. Return to Desktop and try again.')
+      return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body style="font:14px/1.5 system-ui;padding:2rem"><h1>${title}</h1><p>${body}</p></body></html>`
+    },
+  })
+  const toKaifangAccountView = (user: PlatformSessionUser): KaifangAccountView => ({
+    username: user.username,
+    displayName: user.displayName,
+    email: user.email,
+    avatarUrl: null,
+  })
+  const publishPlatformAccount = (account: KaifangAccountView | undefined): void => {
+    platformAccount = account
+    refreshApplicationMenu()
+    if (mainWindow !== undefined && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(DESKTOP_IPC.kaifangChanged, account ?? null)
+    }
+  }
+  const readPlatformAccount = async (): Promise<KaifangAccountView | undefined> => {
+    try {
+      const platformOrigin = await readSharedHarnessUrl(app.getPath('userData'))
+      const session = await readPlatformSession(app.getPath('userData'), platformOrigin, Date.now())
+      return session === undefined ? undefined : toKaifangAccountView(session.user)
+    } catch (error) {
+      console.warn('desktop platform: could not read the stored account', error)
+      return undefined
+    }
+  }
+  const completePlatformSession = async (sessionValue: PlatformSession): Promise<void> => {
+    await writePlatformSession(app.getPath('userData'), sessionValue)
+    publishPlatformAccount(toKaifangAccountView(sessionValue.user))
+    await enterWorkspace()
+  }
+  const startBrowserSignIn = async (): Promise<PlatformBrowserSignInResult> => {
+    if (quitting) return { ok: false, reason: 'cancelled' }
+    const configuredUrl = await readSharedHarnessUrl(app.getPath('userData'))
+    if (configuredUrl === '') return { ok: false, reason: 'url-required' }
+    const result = await platformBrowser.start(configuredUrl)
+    if (!result.ok) return { ok: false, reason: result.reason }
+    try {
+      await completePlatformSession(result.session)
+      return { ok: true }
+    } catch (error) {
+      console.error('desktop platform: could not enter the workspace after sign-in', error)
+      return { ok: false, reason: 'failed' }
+    }
+  }
+  const showPlatformSignIn = async (): Promise<void> => {
+    await openingWelcome
+    if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) {
+      welcomeWindow.destroy()
+      welcomeWindow = undefined
+    }
+    await showWelcome(false, true)
+  }
+  const signOutPlatform = async (): Promise<void> => {
+    if (quitting) return
+    try {
+      await clearPlatformSession(app.getPath('userData'))
+    } catch (error) {
+      console.error('desktop platform: could not remove the session', error)
+      await ordinaryMessageBox({
+        type: 'error',
+        title: locale.messages.kaifangSignOutMenu,
+        message: locale.messages.kaifangSignOutFailed,
+        buttons: [locale.messages.updateAcknowledge],
+        cancelId: 0,
+      })
+      return
+    }
+    publishPlatformAccount(undefined)
+    if (!needsWelcome(await readWelcomeState()) || isQuitting()) return
+    enteredWorkspace = false
+    await showWelcome()
+  }
+  const requestPlatformSignOut = (): void => {
+    void signOutPlatform().catch((error: unknown) => { console.error(error) })
+  }
+  const refreshPlatformAccount = async (): Promise<void> => {
+    const account = await readPlatformAccount()
+    if (account === undefined) {
+      if (platformAccount !== undefined) publishPlatformAccount(undefined)
+      return
+    }
+    if (platformAccount !== undefined
+      && platformAccount.username === account.username
+      && platformAccount.displayName === account.displayName
+      && platformAccount.email === account.email) return
+    publishPlatformAccount(account)
+  }
+  void readPlatformAccount().then((account) => {
+    if (platformAccount === undefined && account !== undefined) publishPlatformAccount(account)
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangAccount, async (event) => {
+    assertProductSender(event)
+    return (await readPlatformAccount()) ?? null
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangSignIn, async (event) => {
+    assertProductSender(event)
+    await showPlatformSignIn()
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangSignOut, async (event) => {
+    assertProductSender(event)
+    await signOutPlatform()
+  })
+  ipcMain.handle(DESKTOP_IPC.kaifangRefresh, async (event) => {
+    assertProductSender(event)
+    await refreshPlatformAccount()
+  })
   const passwordSignIn = async ({ username, password }: PlatformPasswordCredentials): Promise<PlatformPasswordSignInResult> => {
     if (username.trim() === '') return { ok: false, reason: 'username-required' }
     if (password === '') return { ok: false, reason: 'password-required' }
-    try {
-      const configuredUrl = await readSharedHarnessUrl(app.getPath('userData'))
-      if (configuredUrl === '') return { ok: false, reason: 'unreachable' }
-      const loginUrl = new URL('/kaifang-meta/iam/login', configuredUrl)
-      const platformSession = session.fromPartition(SHARED_HARNESS_SESSION_PARTITION)
-      const cookieKey = (cookie: Electron.Cookie): string => `${cookie.name}\0${cookie.domain}\0${cookie.path}`
-      const previousCookies = new Map((await platformSession.cookies.get({ url: loginUrl.href }))
-        .filter(cookie => cookie.name.startsWith('km_sso')).map(cookie => [cookieKey(cookie), cookie.value]))
-      const response = await platformSession.fetch(loginUrl.href, {
-        method: 'POST', redirect: 'manual', credentials: 'include', cache: 'no-store',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ username: username.trim(), password, q: '' }),
-        signal: AbortSignal.timeout(15_000),
-      })
-      const status = response.status
-      await response.body?.cancel().catch(() => {})
-      if (status === 401) return { ok: false, reason: 'invalid-credentials' }
-      const sessionCreated = (await platformSession.cookies.get({ url: loginUrl.href })).some(cookie =>
-        cookie.name.startsWith('km_sso') && previousCookies.get(cookieKey(cookie)) !== cookie.value)
-      if (!sessionCreated) return { ok: false, reason: 'failed' }
-      return await openSharedHarness()
-        ? { ok: true }
-        : { ok: false, reason: 'unreachable' }
-    } catch {
-      return { ok: false, reason: 'unreachable' }
-    }
+    // In-app password no longer opens the Web Harness window; use system-browser OAuth instead.
+    const result = await startBrowserSignIn()
+    return result.ok ? { ok: true }
+      : { ok: false, reason: result.reason === 'unreachable' ? 'unreachable' : 'failed' }
   }
   let openingWelcome: Promise<void> | undefined
   const showWelcome = (settings = false, allowWorkspace = false): Promise<void> => {
@@ -1277,7 +1420,8 @@ async function main(): Promise<void> {
       welcomeWindow = await openWelcomeWindow(locale, {
         readSharedHarnessUrl: async () => readSharedHarnessUrl(app.getPath('userData')),
         saveSharedHarnessUrl: async value => saveSharedHarnessUrl(app.getPath('userData'), value),
-        openSharedHarness,
+        startBrowserSignIn,
+        cancelBrowserSignIn: async () => { platformBrowser.cancel() },
         passwordSignIn,
         skip: enterWorkspace,
       }, settings ? 'settings' : 'entry')
@@ -1348,6 +1492,7 @@ async function main(): Promise<void> {
     backgroundNotice?.dispose()
     tray?.dispose()
     stopAccount?.()
+    platformBrowser.dispose()
     if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.hide()
     if (sharedHarnessWindow !== undefined && !sharedHarnessWindow.isDestroyed()) sharedHarnessWindow.hide()
     if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.hide()

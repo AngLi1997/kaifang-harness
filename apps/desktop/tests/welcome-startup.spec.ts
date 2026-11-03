@@ -220,7 +220,7 @@ it.each([false, true])('starts welcome onboarding without carrying update focus 
   state.loadWorkspace.mockClear()
   expect(state.welcomeLocale).toMatchObject({ id: 'zh-CN' })
   expect(await state.operations!.readSharedHarnessUrl()).toBe('')
-  expect(await state.operations!.openSharedHarness()).toBe(false)
+  expect(await state.operations!.startBrowserSignIn()).toEqual({ ok: false, reason: 'url-required' })
   expect(state.dialogLocale!().id).toBe('zh-CN')
   const attemptId = 'login' as NonNullable<AccountView['attempt']>['id']
   const account: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' }, attempt: null }

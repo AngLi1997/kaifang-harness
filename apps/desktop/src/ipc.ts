@@ -37,7 +37,20 @@ export const DESKTOP_IPC = {
   windowFullscreen: 'dsh-desktop:window-fullscreen',
   windowsAppearance: 'dsh-desktop:windows-appearance',
   windowsMenu: 'dsh-desktop:windows-menu',
+  kaifangAccount: 'dsh-desktop:kaifang-account',
+  kaifangSignIn: 'dsh-desktop:kaifang-sign-in',
+  kaifangSignOut: 'dsh-desktop:kaifang-sign-out',
+  kaifangRefresh: 'dsh-desktop:kaifang-refresh',
+  kaifangChanged: 'dsh-desktop:kaifang-changed',
 } as const
+
+/** Signed-in Platform identity shown by the workspace account launcher; carries no token. */
+export interface KaifangAccountView {
+  readonly username: string
+  readonly displayName: string
+  readonly email: string | null
+  readonly avatarUrl: string | null
+}
 
 /** Desktop release update state rendered by desktop-owned UI. */
 export type DesktopUpdatePreparationFailureKind = 'stop-failed' | 'tasks-changed' | 'tasks-unavailable' | 'fullscreen-timeout'
@@ -89,6 +102,14 @@ export interface DshDesktopProductApi {
    * @returns `name=value` fields separated by `; `, with no hostname, user name, or serial number.
    */
   deviceInfo(): Promise<string>
+  /** Platform account stored by system-browser OAuth; absent until sign-in. */
+  readonly kaifang: {
+    current(): Promise<KaifangAccountView | null>
+    signIn(): Promise<void>
+    signOut(): Promise<void>
+    refresh(): Promise<void>
+    subscribe(listener: (account: KaifangAccountView | null) => void): () => void
+  }
   readonly updates: {
     status(): Promise<DesktopUpdatePresentation>
     open(): Promise<void>

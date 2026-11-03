@@ -53,8 +53,10 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
   const disposeHandlers = (): void => {
     if (!active) return
     active = false
-    for (const channel of [WELCOME_IPC.skip, WELCOME_IPC.openSharedHarness, WELCOME_IPC.passwordSignIn, WELCOME_IPC.readSharedHarnessUrl,
-      WELCOME_IPC.saveSharedHarnessUrl]) ipcMain.removeHandler(channel)
+    for (const channel of [WELCOME_IPC.skip, WELCOME_IPC.startBrowserSignIn, WELCOME_IPC.cancelBrowserSignIn,
+      WELCOME_IPC.passwordSignIn, WELCOME_IPC.readSharedHarnessUrl, WELCOME_IPC.saveSharedHarnessUrl]) {
+      ipcMain.removeHandler(channel)
+    }
     disposeActiveHandlers = undefined
   }
   disposeActiveHandlers = disposeHandlers
@@ -71,9 +73,13 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     assertSender(event)
     return operations.saveSharedHarnessUrl(typeof value === 'string' ? value : '')
   })
-  ipcMain.handle(WELCOME_IPC.openSharedHarness, async (event) => {
+  ipcMain.handle(WELCOME_IPC.startBrowserSignIn, async (event) => {
     assertSender(event)
-    return operations.openSharedHarness()
+    return operations.startBrowserSignIn()
+  })
+  ipcMain.handle(WELCOME_IPC.cancelBrowserSignIn, async (event) => {
+    assertSender(event)
+    await operations.cancelBrowserSignIn()
   })
   ipcMain.handle(WELCOME_IPC.passwordSignIn, async (event, value: unknown) => {
     assertSender(event)

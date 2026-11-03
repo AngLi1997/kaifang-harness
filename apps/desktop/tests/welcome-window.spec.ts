@@ -41,7 +41,8 @@ function createWindow() {
 const operations = {
   readSharedHarnessUrl: vi.fn(async () => ''),
   saveSharedHarnessUrl: vi.fn(async (value: string) => ({ ok: true as const, url: value })),
-  openSharedHarness: vi.fn(async () => true),
+  startBrowserSignIn: vi.fn(async () => ({ ok: true as const })),
+  cancelBrowserSignIn: vi.fn(async () => {}),
   passwordSignIn: vi.fn(async () => ({ ok: true as const })),
   skip: vi.fn(async () => {}),
 }
@@ -102,19 +103,22 @@ describe('desktop welcome window', () => {
     const save = electron.handlers.get(WELCOME_IPC.saveSharedHarnessUrl)!
     await expect(save({ ...own, senderFrame: {} }, 'https://harness.example')).rejects.toThrow('unowned frame')
     expect(await save(own, 'https://harness.example')).toEqual({ ok: true, url: 'https://harness.example' })
-    expect(await electron.handlers.get(WELCOME_IPC.openSharedHarness)!(own)).toBe(true)
+    expect(await electron.handlers.get(WELCOME_IPC.startBrowserSignIn)!(own)).toEqual({ ok: true })
     expect(await electron.handlers.get(WELCOME_IPC.passwordSignIn)!(own, { username: 'admin', password: 'secret' })).toEqual({ ok: true })
+    await electron.handlers.get(WELCOME_IPC.cancelBrowserSignIn)!(own)
     await electron.handlers.get(WELCOME_IPC.skip)!(own)
-    expect(operations.openSharedHarness).toHaveBeenCalledOnce()
+    expect(operations.startBrowserSignIn).toHaveBeenCalledOnce()
+    expect(operations.cancelBrowserSignIn).toHaveBeenCalledOnce()
     expect(operations.passwordSignIn).toHaveBeenCalledExactlyOnceWith({ username: 'admin', password: 'secret' })
     expect(operations.skip).toHaveBeenCalledOnce()
     window.once.mock.calls[0]![1]()
     expect(electron.handlers.size).toBe(0)
   })
 
-  it('shows the local welcome only when neither local account nor API key is configured', () => {
-    expect(needsWelcome({ loggedIn: true, hasApiKey: false })).toBe(false)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: false })).toBe(true)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: true })).toBe(false)
+  it('shows the local welcome only when no local account, API key, or Platform session is configured', () => {
+    expect(needsWelcome({ loggedIn: true, hasApiKey: false, platformSignedIn: false })).toBe(false)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: false, platformSignedIn: false })).toBe(true)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: true, platformSignedIn: false })).toBe(false)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: false, platformSignedIn: true })).toBe(false)
   })
 })

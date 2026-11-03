@@ -1,25 +1,22 @@
-/** Native Platform sign-in and shared Harness entry. */
+/** Native Platform sign-in through the system browser; keeps the Desktop shell after success. */
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Toast } from '@deepseek-ai/dsh-client-ui-primitives/src/Toast.tsx'
 import type { WelcomeApi } from '../welcome-api.ts'
 
-type Page = 'entry' | 'password' | 'settings'
+type Page = 'entry' | 'settings'
 
 /** @param api - isolated native operations and localized shell copy. */
 export function Welcome({ api }: { api: WelcomeApi }) {
   const { messages: m } = api
-  const [page, setPage] = useState<Page>(api.initialPage)
+  const [page, setPage] = useState<Page>(api.initialPage === 'settings' ? 'settings' : 'entry')
   const [sharedHarnessUrl, setSharedHarnessUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  const [waitingBrowser, setWaitingBrowser] = useState(false)
   const [openError, setOpenError] = useState(false)
   const [settingsError, setSettingsError] = useState('')
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [passwordError, setPasswordError] = useState('')
+  const [signInError, setSignInError] = useState('')
   const urlInput = useRef<HTMLInputElement>(null)
-  const usernameInput = useRef<HTMLInputElement>(null)
-  const passwordInput = useRef<HTMLInputElement>(null)
   const settingsButton = useRef<HTMLButtonElement>(null)
   const mounted = useRef(true)
 
@@ -32,7 +29,6 @@ export function Welcome({ api }: { api: WelcomeApi }) {
 
   useEffect(() => {
     if (page === 'settings') urlInput.current?.focus()
-    else if (page === 'password') usernameInput.current?.focus()
     else if (page === 'entry') settingsButton.current?.focus()
   }, [page])
 
@@ -68,7 +64,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
         return
       }
       setSharedHarnessUrl(saved.url)
-      if (!await api.openSharedHarness() && mounted.current) setOpenError(true)
+      if (mounted.current) setPage('entry')
     } catch {
       if (mounted.current) setSettingsError(m.welcomeSettingsFailed)
     } finally {
@@ -76,47 +72,42 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     }
   }
 
-  async function openSharedHarness() {
+  async function startBrowserSignIn() {
+    if (busy) return
     setBusy(true)
+    setWaitingBrowser(true)
     setOpenError(false)
+    setSignInError('')
     try {
-      if (!await api.openSharedHarness()) {
+      const result = await api.startBrowserSignIn()
+      if (!mounted.current || result.ok) return
+      if (result.reason === 'url-required') {
         await openSettings()
-        if (mounted.current) setOpenError(true)
+        setOpenError(true)
         return
       }
+      if (result.reason === 'cancelled' || result.reason === 'denied') return
+      setSignInError(result.reason === 'unreachable' ? m.welcomePasswordUnreachable
+        : result.reason === 'expired' ? m.welcomeAuthExpired : m.welcomeAuthFailed)
     } catch {
-      if (mounted.current) setOpenError(true)
+      if (mounted.current) setSignInError(m.welcomeAuthFailed)
     } finally {
-      if (mounted.current) setBusy(false)
+      if (mounted.current) {
+        setBusy(false)
+        setWaitingBrowser(false)
+      }
     }
   }
 
-  async function submitPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (busy) return
-    if (username.trim() === '') { setPasswordError(m.welcomeUsernameRequired); usernameInput.current?.focus(); return }
-    if (password === '') { setPasswordError(m.welcomePasswordRequired); passwordInput.current?.focus(); return }
-    setBusy(true)
-    setPasswordError('')
-    try {
-      const result = await api.passwordSignIn({ username: username.trim(), password })
-      if (!mounted.current || result.ok) return
-      setPasswordError(result.reason === 'username-required' ? m.welcomeUsernameRequired
-        : result.reason === 'password-required' ? m.welcomePasswordRequired
-          : result.reason === 'invalid-credentials' ? m.welcomePasswordInvalid
-            : result.reason === 'unreachable' ? m.welcomePasswordUnreachable : m.welcomePasswordFailed)
-    } catch {
-      if (mounted.current) setPasswordError(m.welcomePasswordFailed)
-    } finally {
-      if (mounted.current) { setPassword(''); setBusy(false) }
-    }
+  async function cancelBrowserSignIn() {
+    try { await api.cancelBrowserSignIn() } catch { /* main settles the attempt */ }
   }
 
   return <>
     {openError && <Toast text={m.welcomeAuthFailed} onDone={() => { setOpenError(false) }} />}
+    {signInError !== '' && <Toast text={signInError} onDone={() => { setSignInError('') }} />}
     <div className="titlebar" aria-hidden="true" />
-    <main className="welcome" aria-labelledby={page === 'entry' ? 'welcome-heading' : page === 'password' ? 'password-title' : 'settings-title'}>
+    <main className="welcome" aria-labelledby={page === 'entry' ? 'welcome-heading' : 'settings-title'}>
       <div className="brand">
         <img className="brand-logo" src="assets/kaifang-logo.png" alt={m.welcomeBrand} width="40" height="39" />
         <span className="brand-name" aria-hidden="true">{m.welcomeBrand}</span>
@@ -140,43 +131,18 @@ export function Welcome({ api }: { api: WelcomeApi }) {
           </div>
         </div>
       </form>
-      <form id="password-form" className="key-form settings-form" hidden={page !== 'password'} noValidate onSubmit={(event) => { void submitPassword(event) }} aria-busy={busy}>
-        <header className="key-heading">
-          <h1 id="password-title">{m.welcomePasswordTitle}</h1>
-          <p id="password-description">{m.welcomePasswordDescription}</p>
-        </header>
-        <div className="settings-fields">
-          <div className="key-field">
-            <label className="field-label" htmlFor="username">{m.welcomeUsername}</label>
-            <input ref={usernameInput} id="username" type="text" autoComplete="username" autoCapitalize="off" spellCheck={false}
-              value={username} placeholder={m.welcomeUsernamePlaceholder} disabled={busy}
-              aria-invalid={passwordError === m.welcomeUsernameRequired}
-              onChange={(event) => { setUsername(event.currentTarget.value); setPasswordError('') }} />
-            {passwordError === m.welcomeUsernameRequired && <p className="key-error" role="alert">{passwordError}</p>}
-          </div>
-          <div className="key-field">
-            <label className="field-label" htmlFor="password">{m.welcomePassword}</label>
-            <input ref={passwordInput} id="password" type="password" autoComplete="current-password" autoCapitalize="off" spellCheck={false}
-              value={password} placeholder={m.welcomePasswordPlaceholder} disabled={busy} aria-invalid={passwordError !== '' && passwordError !== m.welcomeUsernameRequired}
-              onChange={(event) => { setPassword(event.currentTarget.value); setPasswordError('') }} />
-            {passwordError !== '' && passwordError !== m.welcomeUsernameRequired && <p className="key-error" role="alert">{passwordError}</p>}
-          </div>
-        </div>
-      </form>
       <div id="entry-actions" className="actions" hidden={page !== 'entry'}>
-        <button id="open-shared-harness" className="primary" type="button" disabled={busy} onClick={() => { void openSharedHarness() }}>
+        {!waitingBrowser && <button id="start-browser-sign-in" className="primary" type="button" disabled={busy} onClick={() => { void startBrowserSignIn() }}>
           {busy ? m.welcomeAuthStarting : m.welcomeSignIn}
-        </button>
-        <button id="password-sign-in" className="secondary" type="button" disabled={busy} onClick={() => { setPasswordError(''); setPage('password') }}>
-          {m.welcomePasswordSignIn}
-        </button>
-      </div>
-      <div id="password-actions" className="actions" hidden={page !== 'password'}>
-        <button id="submit-password" className="primary" type="submit" form="password-form" disabled={busy}>
-          {busy ? m.welcomeAuthStarting : m.welcomePasswordSubmit}
-        </button>
-        <button id="password-back" className="secondary" type="button" disabled={busy} onClick={() => { setPassword(''); setPasswordError(''); setPage('entry') }}>
-          {m.welcomeSettingsBack}
+        </button>}
+        {waitingBrowser && <>
+          <p id="browser-waiting" className="welcome-waiting">{m.welcomeAuthWaitingDescription}</p>
+          <button id="cancel-browser-sign-in" className="secondary" type="button" onClick={() => { void cancelBrowserSignIn() }}>
+            {m.welcomeAuthCancel}
+          </button>
+        </>}
+        <button id="open-local-workspace" className="secondary" type="button" disabled={busy || waitingBrowser} onClick={() => { void api.skip() }}>
+          {m.openLocalWorkspaceMenu}
         </button>
       </div>
       <div id="settings-actions" className="actions" hidden={page !== 'settings'}>

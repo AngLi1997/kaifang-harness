@@ -1,8 +1,8 @@
-/** Localized welcome copy and validated shared-Harness operations. */
+/** Localized welcome copy and validated Platform sign-in operations. */
 
 import { contextBridge, ipcRenderer } from 'electron'
 import { resolveDesktopLocale } from './locale.ts'
-import { WELCOME_IPC, type PlatformPasswordSignInResult, type SharedHarnessUrlSaveResult, type WelcomeApi } from './welcome-api.ts'
+import { WELCOME_IPC, type PlatformBrowserSignInResult, type PlatformPasswordSignInResult, type SharedHarnessUrlSaveResult, type WelcomeApi } from './welcome-api.ts'
 
 const prefix = '--dsh-welcome-locale='
 const locale = process.argv.find(argument => argument.startsWith(prefix))?.slice(prefix.length)
@@ -11,7 +11,8 @@ const initialPage = process.argv.includes('--dsh-welcome-page=settings') ? 'sett
 const api: WelcomeApi = {
   ...resolveDesktopLocale(locale),
   initialPage,
-  openSharedHarness: () => ipcRenderer.invoke(WELCOME_IPC.openSharedHarness) as Promise<boolean>,
+  startBrowserSignIn: () => ipcRenderer.invoke(WELCOME_IPC.startBrowserSignIn) as Promise<PlatformBrowserSignInResult>,
+  cancelBrowserSignIn: () => ipcRenderer.invoke(WELCOME_IPC.cancelBrowserSignIn) as Promise<void>,
   passwordSignIn: credentials => ipcRenderer.invoke(WELCOME_IPC.passwordSignIn, credentials) as Promise<PlatformPasswordSignInResult>,
   readSharedHarnessUrl: () => ipcRenderer.invoke(WELCOME_IPC.readSharedHarnessUrl) as Promise<string>,
   saveSharedHarnessUrl: value => ipcRenderer.invoke(WELCOME_IPC.saveSharedHarnessUrl, value) as Promise<SharedHarnessUrlSaveResult>,
