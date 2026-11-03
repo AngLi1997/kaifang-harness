@@ -241,10 +241,10 @@
     - id: kaifang-platform-auth
       name: '@deepseek-ai/dsh-kaifang-platform-auth'
       config:
-        issuer: !!js process.env.DSH_KAIFANG_IAM_ISSUER ?? ''
-        clientId: !!js process.env.DSH_KAIFANG_CLIENT_ID ?? 'kaifang-harness'
-        redirectUri: !!js process.env.DSH_KAIFANG_REDIRECT_URI ?? ''
-        audience: !!js process.env.DSH_KAIFANG_AUDIENCE ?? 'kaifang-meta-platform'
+        issuer: http://localhost:9080/kaifang-meta/iam
+        clientId: kaifang-harness
+        redirectUri: http://127.0.0.1:3080/kaifang/auth/callback
+        audience: kaifang-meta-platform
         requiredScopes: ['model:invoke']
         refreshSkewSeconds: 60
         requestTimeoutMs: 10000

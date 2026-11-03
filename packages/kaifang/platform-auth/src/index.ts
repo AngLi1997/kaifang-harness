@@ -1,6 +1,8 @@
 /** KaifangMeta IAM authorization for one shared multi-user Web Host. */
 import { createHash, randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { isIP } from 'node:net'
+import { TLSSocket } from 'node:tls'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type { ConnectionAdmissionProvider, ConnectionTrustRequest } from '@deepseek-ai/dsh-client-connection'
@@ -24,6 +26,8 @@ const AUTH_PATH = '/kaifang/auth'
 const CALLBACK_SUFFIX = `${AUTH_PATH}/callback`
 const SESSION_INDEX_KEY = credentialKey('kaifang-platform-auth', 'sessions')
 const SESSION_COOKIE = 'dsh_kaifang_auth'
+const LOCAL_SESSION_COOKIE = `${SESSION_COOKIE}_local`
+const ATTEMPT_COOKIE_PREFIX = `${SESSION_COOKIE}_attempt_`
 const RECORD_VERSION = 1
 const ATTEMPT_TTL_MS = 10 * 60 * 1000
 const MAX_ATTEMPTS = 8
@@ -93,7 +97,7 @@ export interface PlatformAuthConfig {
   issuer?: string
   /** Registered public OAuth client. */
   clientId?: string
-  /** One exact callback URI registered in IAM for the shared Web Host. */
+  /** Shared Host callback URI; local development reuses its scheme, port, path, and query for local host aliases. */
   redirectUri?: string
   /** User-token audience expected from the platform. */
   audience?: string
@@ -141,7 +145,17 @@ interface StoredSession {
 interface Attempt {
   readonly verifier: string
   readonly sessionId: string
+  readonly redirectUri: string
+  readonly authorizationOrigin: string
+  readonly local: boolean
   readonly expiresAt: number
+}
+
+interface SignInEndpoints {
+  readonly issuer: string
+  readonly redirectUri: string
+  readonly authorizationOrigin: string
+  readonly local: boolean
 }
 
 interface TokenReply {
@@ -218,14 +232,33 @@ function headerValue(headers: ConnectionTrustRequest['headers'], name: string): 
 }
 
 function sessionIdFromHeaders(headers: ConnectionTrustRequest['headers']): string | undefined {
+  const host = headerValue(headers, 'host')
+  if (host !== undefined) {
+    try {
+      if (isLocalDevelopmentHost(new URL(`http://${host}`).hostname)) {
+        return cookieValue(headers, LOCAL_SESSION_COOKIE)
+      }
+    }
+    catch {}
+  }
+  return cookieValue(headers, SESSION_COOKIE)
+}
+
+function attemptSessionIdFromHeaders(headers: ConnectionTrustRequest['headers'], state: string): string | undefined {
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(state)) return undefined
+  return cookieValue(headers, `${ATTEMPT_COOKIE_PREFIX}${state}`)
+}
+
+function cookieValue(headers: ConnectionTrustRequest['headers'], name: string): string | undefined {
   const cookie = headerValue(headers, 'cookie')
   if (cookie === undefined) return undefined
+  let result: string | undefined
   for (const part of cookie.split(';')) {
-    const [name, ...rest] = part.trim().split('=')
+    const [cookieName, ...rest] = part.trim().split('=')
     const value = rest.join('=')
-    if (name === SESSION_COOKIE && /^[A-Za-z0-9_-]{43}$/u.test(value)) return value
+    if (cookieName === name && /^[A-Za-z0-9_-]{43}$/u.test(value)) result = value
   }
-  return undefined
+  return result
 }
 
 function writeJson(res: ServerResponse, status: number, value: unknown): void {
@@ -253,6 +286,65 @@ function requestUrl(req: IncomingMessage): URL {
   return new URL(req.url ?? '/', 'http://dsh.invalid')
 }
 
+function isLocalDevelopmentHost(host: string): boolean {
+  const normalized = host.toLowerCase().replace(/^\[|\]$/gu, '')
+  if (normalized === 'localhost' || normalized.endsWith('.localhost')) return true
+  if (normalized.startsWith('::ffff:')) return isLocalDevelopmentHost(normalized.slice(7))
+  const version = isIP(normalized)
+  if (version === 4) {
+    const [a, b] = normalized.split('.').map(Number)
+    return a === 10 || a === 127 || (a === 172 && b !== undefined && b >= 16 && b <= 31)
+      || (a === 192 && b === 168) || (a === 169 && b === 254)
+  }
+  return version === 6 && (normalized === '::1' || /^(?:fc|fd|fe[89ab])/u.test(normalized))
+}
+
+function requestProtocol(req: IncomingMessage): 'http:' | 'https:' {
+  const forwarded = req.headers['x-forwarded-proto']
+  const externalProtocol = typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : undefined
+  if (externalProtocol === 'https') return 'https:'
+  if (externalProtocol === 'http') return 'http:'
+  return req.socket instanceof TLSSocket ? 'https:' : 'http:'
+}
+
+function signInEndpoints(config: ResolvedPlatformAuthConfig, req: IncomingMessage, listenerPort?: number): SignInEndpoints {
+  const issuer = new URL(config.issuer)
+  const redirect = new URL(config.redirectUri)
+  const protocol = requestProtocol(req)
+  try {
+    const host = req.headers.host
+    if (typeof host !== 'string') throw new Error('missing Host')
+    const authority = new URL(`${protocol}//${host}`)
+    const defaultPort = protocol === 'https:' ? 443 : 80
+    const callbackPort = listenerPort ?? Number(redirect.port || defaultPort)
+    if (authority.username || authority.password || authority.pathname !== '/' || authority.search || authority.hash
+      || !isLocalDevelopmentHost(authority.hostname)
+      || !isLocalDevelopmentHost(issuer.hostname)
+      || !isLocalDevelopmentHost(redirect.hostname)
+      || Number(authority.port || defaultPort) !== callbackPort || protocol !== redirect.protocol) {
+      throw new Error('not a local alias')
+    }
+    const hostname = authority.hostname
+    issuer.hostname = hostname
+    redirect.hostname = hostname
+    redirect.port = callbackPort === defaultPort ? '' : String(callbackPort)
+    return {
+      issuer: issuer.href.replace(/\/$/u, ''),
+      redirectUri: redirect.href,
+      authorizationOrigin: issuer.origin,
+      local: true,
+    }
+  }
+  catch {
+    return {
+      issuer: config.issuer,
+      redirectUri: config.redirectUri,
+      authorizationOrigin: new URL(config.issuer).origin,
+      local: false,
+    }
+  }
+}
+
 function isLoopbackBind(host: string): boolean {
   return host === '::1' || host.startsWith('127.')
 }
@@ -277,11 +369,11 @@ function configured(config: ResolvedPlatformAuthConfig): boolean {
 function validateUrls(config: ResolvedPlatformAuthConfig): void {
   const issuer = new URL(config.issuer)
   const callback = new URL(config.redirectUri)
-  if (issuer.protocol !== 'https:' && !(issuer.protocol === 'http:' && (issuer.hostname === 'localhost' || issuer.hostname === '127.0.0.1' || issuer.hostname === '::1'))) {
-    throw new Error('kaifang-platform-auth: IAM issuer must use HTTPS except on loopback development')
+  if (issuer.protocol !== 'https:' && !(issuer.protocol === 'http:' && isLocalDevelopmentHost(issuer.hostname))) {
+    throw new Error('kaifang-platform-auth: IAM issuer must use HTTPS except on local development hosts')
   }
-  if (callback.protocol !== 'https:' && !(callback.protocol === 'http:' && (callback.hostname === 'localhost' || callback.hostname === '127.0.0.1' || callback.hostname === '::1'))) {
-    throw new Error('kaifang-platform-auth: redirectUri must use HTTPS except on loopback development')
+  if (callback.protocol !== 'https:' && !(callback.protocol === 'http:' && isLocalDevelopmentHost(callback.hostname))) {
+    throw new Error('kaifang-platform-auth: redirectUri must use HTTPS except on local development hosts')
   }
   if (callback.pathname !== CALLBACK_SUFFIX || callback.search !== '' || callback.hash !== '') {
     throw new Error(`kaifang-platform-auth: redirectUri path must equal ${CALLBACK_SUFFIX}`)
@@ -365,24 +457,47 @@ class PlatformSession {
     return { sub: session.sub, tid: session.tid }
   }
 
-  start(): { readonly authorizeUrl: string; readonly sessionId: string } {
+  start(req: IncomingMessage, listenerPort?: number): {
+    readonly authorizeUrl: string
+    readonly sessionId: string
+    readonly state: string
+    readonly endpoints: SignInEndpoints
+  } {
     this.pruneAttempts()
     const sessionId = randomBytes(32).toString('base64url')
     const verifier = randomBytes(32).toString('base64url')
     const state = randomBytes(32).toString('base64url')
+    const endpoints = signInEndpoints(this.config, req, listenerPort)
     if (this.attempts.size >= MAX_ATTEMPTS) {
       const oldest = this.attempts.keys().next().value as string | undefined
       if (oldest !== undefined) this.attempts.delete(oldest)
     }
-    this.attempts.set(state, { verifier, sessionId, expiresAt: Date.now() + ATTEMPT_TTL_MS })
-    const authorize = new URL('authorize', `${this.config.issuer.replace(/\/+$/u, '')}/`)
+    this.attempts.set(state, {
+      verifier,
+      sessionId,
+      redirectUri: endpoints.redirectUri,
+      authorizationOrigin: endpoints.authorizationOrigin,
+      local: endpoints.local,
+      expiresAt: Date.now() + ATTEMPT_TTL_MS,
+    })
+    const authorize = new URL('authorize', `${endpoints.issuer.replace(/\/+$/u, '')}/`)
     authorize.searchParams.set('client_id', this.config.clientId)
-    authorize.searchParams.set('redirect_uri', this.config.redirectUri)
+    authorize.searchParams.set('redirect_uri', endpoints.redirectUri)
     authorize.searchParams.set('response_type', 'code')
     authorize.searchParams.set('code_challenge_method', 'S256')
     authorize.searchParams.set('code_challenge', createHash('sha256').update(verifier).digest('base64url'))
     authorize.searchParams.set('state', state)
-    return { authorizeUrl: authorize.href, sessionId }
+    return { authorizeUrl: authorize.href, sessionId, state, endpoints }
+  }
+
+  callbackTarget(state: string): Pick<SignInEndpoints, 'redirectUri' | 'authorizationOrigin' | 'local'> | undefined {
+    const attempt = this.attempts.get(state)
+    if (attempt === undefined || attempt.expiresAt < Date.now()) return undefined
+    return { redirectUri: attempt.redirectUri, authorizationOrigin: attempt.authorizationOrigin, local: attempt.local }
+  }
+
+  cancelAttempt(state: string): void {
+    this.attempts.delete(state)
   }
 
   async complete(code: string, state: string, sessionId: string): Promise<StoredSession> {
@@ -396,7 +511,7 @@ class PlatformSession {
       grant_type: 'authorization_code',
       client_id: this.config.clientId,
       code,
-      redirect_uri: this.config.redirectUri,
+      redirect_uri: attempt.redirectUri,
       code_verifier: attempt.verifier,
     })
     const user = await this.userinfo(token.accessToken, token.sub)
@@ -577,33 +692,55 @@ function registerAdmissionProvider(
   return connection.registerAdmissionProvider(provider)
 }
 
-/** The OAuth redirect is cross-site by design; bind it to this Host's exact registered callback authority. */
+/** Bind the OAuth callback to the authority selected for its saved PKCE state. */
 function checkCallbackAuthority(
-  config: ResolvedPlatformAuthConfig,
   req: IncomingMessage,
   res: ServerResponse,
+  target: Pick<SignInEndpoints, 'redirectUri' | 'authorizationOrigin'>,
   allowExternalOrigin = false,
 ): boolean {
   const host = req.headers.host
-  const callback = new URL(config.redirectUri)
+  const callback = new URL(target.redirectUri)
   const origin = req.headers.origin
   const fetchMode = req.headers['sec-fetch-mode']
   let hostMatches = false
   try { hostMatches = typeof host === 'string' && new URL(`${callback.protocol}//${host}`).host === callback.host }
   catch { hostMatches = false }
-  const originMatches = allowExternalOrigin || origin === undefined || origin === new URL(config.issuer).origin
+  const originMatches = allowExternalOrigin || origin === undefined || origin === target.authorizationOrigin
   const navigation = fetchMode === undefined || fetchMode === 'navigate'
   if (hostMatches && originMatches && navigation) return true
   writeText(res, 403, 'forbidden')
   return false
 }
 
-function sessionCookie(config: ResolvedPlatformAuthConfig, sessionId: string | undefined, maxAge: number): string {
+function sessionCookie(
+  sessionId: string | undefined,
+  maxAge: number,
+  endpoints: Pick<SignInEndpoints, 'redirectUri' | 'local'>,
+): string {
+  const cookieName = endpoints.local ? LOCAL_SESSION_COOKIE : SESSION_COOKIE
   const value = sessionId ?? ''
-  // OAuth routes live below `/kaifang/auth`, while the UI and Connection RPC
-  // use `/` and `/api`; the dedicated Host origin scopes this cookie.
-  return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${String(maxAge)}`
-    + (new URL(config.redirectUri).protocol === 'https:' ? '; Secure' : '')
+  if (endpoints.local) {
+    return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${String(maxAge)}`
+      + (new URL(endpoints.redirectUri).protocol === 'https:' ? '; Secure' : '')
+  }
+  // Cross-site OAuth may run in an iframe; partition this cookie by top-level site.
+  return `${cookieName}=${value}; Path=/; HttpOnly; SameSite=None; Secure; Partitioned; Max-Age=${String(maxAge)}`
+}
+
+function attemptCookie(
+  state: string,
+  sessionId: string | undefined,
+  maxAge: number,
+  endpoints: Pick<SignInEndpoints, 'redirectUri' | 'local'>,
+): string {
+  const name = `${ATTEMPT_COOKIE_PREFIX}${state}`
+  const value = sessionId ?? ''
+  if (endpoints.local) {
+    return `${name}=${value}; Path=${CALLBACK_SUFFIX}; HttpOnly; SameSite=Lax; Max-Age=${String(maxAge)}`
+      + (new URL(endpoints.redirectUri).protocol === 'https:' ? '; Secure' : '')
+  }
+  return `${name}=${value}; Path=${CALLBACK_SUFFIX}; HttpOnly; SameSite=None; Secure; Partitioned; Max-Age=${String(maxAge)}`
 }
 
 function sameOriginMutation(req: IncomingMessage): boolean {
@@ -614,8 +751,8 @@ function sameOriginMutation(req: IncomingMessage): boolean {
   catch { return false }
 }
 
-function callbackRoot(config: ResolvedPlatformAuthConfig): string {
-  const callback = new URL(config.redirectUri)
+function callbackRoot(redirectUri: string): string {
+  const callback = new URL(redirectUri)
   callback.pathname = '/'
   callback.search = ''
   callback.hash = ''
@@ -707,22 +844,23 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
           } })
         })),
         webCtx.webServer.register(route(`${AUTH_PATH}/entry`, (req, res) => {
-          if (!checkCallbackAuthority(resolved, req, res, true)) return
-          if (req.method !== 'GET') { writeText(res, 405, 'method not allowed'); return }
           if (!enabled) { writeText(res, 503, 'KaifangMeta IAM is not configured for this Web Host'); return }
+          const endpoints = signInEndpoints(resolved, req, webCtx.webServer.port)
+          if (!checkCallbackAuthority(req, res, endpoints, true)) return
+          if (req.method !== 'GET') { writeText(res, 405, 'method not allowed'); return }
           const sessionId = sessionIdFromHeaders(req.headers as ConnectionTrustRequest['headers'])
           if (auth.hasLiveSession(sessionId)) {
             res.writeHead(303, {
-              location: webCtx.connection.authenticatedUrl(callbackRoot(resolved)),
+              location: webCtx.connection.authenticatedUrl(callbackRoot(endpoints.redirectUri)),
               'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
             })
             res.end()
             return
           }
-          const attempt = auth.start()
+          const attempt = auth.start(req, webCtx.webServer.port)
           res.writeHead(302, {
             location: attempt.authorizeUrl,
-            'set-cookie': sessionCookie(resolved, attempt.sessionId, 60 * 60 * 24 * 30),
+            'set-cookie': attemptCookie(attempt.state, attempt.sessionId, Math.ceil(ATTEMPT_TTL_MS / 1000), attempt.endpoints),
             'cache-control': 'no-store',
             'referrer-policy': 'no-referrer',
           })
@@ -732,43 +870,61 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
           if (!checkTrusted(webCtx.connection, req, res)) return
           if (req.method !== 'GET') { writeText(res, 405, 'method not allowed'); return }
           if (!enabled) { writeText(res, 503, 'KaifangMeta IAM is not configured for this Web Host'); return }
-          const attempt = auth.start()
+          const attempt = auth.start(req, webCtx.webServer.port)
           res.writeHead(302, {
             location: attempt.authorizeUrl,
-            'set-cookie': sessionCookie(resolved, attempt.sessionId, 60 * 60 * 24 * 30),
+            'set-cookie': attemptCookie(attempt.state, attempt.sessionId, Math.ceil(ATTEMPT_TTL_MS / 1000), attempt.endpoints),
             'cache-control': 'no-store',
             'referrer-policy': 'no-referrer',
           })
           res.end()
         })),
         webCtx.webServer.register(route(CALLBACK_SUFFIX, async (req, res) => {
-          if (!checkCallbackAuthority(resolved, req, res)) return
           if (req.method !== 'GET') { writeText(res, 405, 'method not allowed'); return }
           if (!enabled) { writeText(res, 503, 'KaifangMeta IAM is not configured for this Web Host'); return }
           const url = requestUrl(req)
           const states = url.searchParams.getAll('state')
           const codes = url.searchParams.getAll('code')
-          const sessionId = sessionIdFromHeaders(req.headers as ConnectionTrustRequest['headers'])
           const state = states[0]
           const code = codes[0]
           if (states.length !== 1 || codes.length !== 1 || state === undefined || code === undefined || url.searchParams.has('error')) {
+            if (states.length === 1 && state !== undefined && /^[A-Za-z0-9_-]{43}$/u.test(state)) {
+              const target = auth.callbackTarget(state)
+              if (target !== undefined) {
+                auth.cancelAttempt(state)
+                res.setHeader('set-cookie', attemptCookie(state, undefined, 0, target))
+              }
+            }
             writeText(res, 400, 'Sign-in was cancelled or the callback was invalid. Return to the Harness Web app and try again.')
             return
           }
+          const target = auth.callbackTarget(state)
+          if (target === undefined) {
+            writeText(res, 400, 'Sign-in attempt expired. Return to the Harness Web app and try again.')
+            return
+          }
+          if (!checkCallbackAuthority(req, res, target)) return
+          const sessionId = attemptSessionIdFromHeaders(req.headers as ConnectionTrustRequest['headers'], state)
           if (sessionId === undefined) {
+            res.setHeader('set-cookie', attemptCookie(state, undefined, 0, target))
             writeText(res, 400, 'Sign-in session is missing. Return to the Harness Web app and try again.')
             return
           }
           try {
             await auth.complete(code, state, sessionId)
             res.writeHead(303, {
-              location: webCtx.connection.authenticatedUrl(callbackRoot(resolved)),
+              location: webCtx.connection.authenticatedUrl(callbackRoot(target.redirectUri)),
+              'set-cookie': [
+                sessionCookie(sessionId, 60 * 60 * 24 * 30, target),
+                attemptCookie(state, undefined, 0, target),
+              ],
               'cache-control': 'no-store',
               'referrer-policy': 'no-referrer',
             })
             res.end()
           } catch (error) {
             console.warn('[kaifang-platform-auth] OAuth callback failed', error)
+            res.setHeader('set-cookie', attemptCookie(state, undefined, 0, target))
             writeText(res, 400, 'Sign-in could not be completed. Return to the Harness Web app and try again.')
           }
         })),
@@ -793,7 +949,7 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
               'content-type': 'application/json; charset=utf-8',
               'content-length': Buffer.byteLength(body),
               'x-content-type-options': 'nosniff',
-              'set-cookie': sessionCookie(resolved, undefined, 0),
+              'set-cookie': sessionCookie(undefined, 0, signInEndpoints(resolved, req, webCtx.webServer.port)),
             })
             res.end(body)
           } catch (error) {

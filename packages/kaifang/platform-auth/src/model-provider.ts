@@ -23,11 +23,11 @@ interface ToolCallState {
   arguments: string
 }
 
-function apiUrl(issuer: string, path: string): URL {
+function apiUrl(issuer: string, path: string, api = 'ai'): URL {
   const base = new URL(issuer)
   const prefix = base.pathname.replace(/\/iam\/?$/u, '')
   if (prefix === base.pathname) throw new Error('KaifangMeta IAM issuer must end in /iam')
-  return new URL(`${prefix}/platform/ai/v1/${path}`, base.origin)
+  return new URL(`${prefix}/platform/${api}/v1/${path}`, base.origin)
 }
 
 export class KaifangPlatformModelAdapter extends LlmAdapter {
@@ -37,6 +37,7 @@ export class KaifangPlatformModelAdapter extends LlmAdapter {
     private readonly ctx: Context,
     private readonly issuer: string,
     private readonly token: () => string | undefined,
+    private readonly desktop: boolean,
   ) { super() }
 
   override providerInfo(provider: string) { return { id: provider, name: 'KaifangMeta 平台模型' } }
@@ -110,10 +111,14 @@ export class KaifangPlatformModelAdapter extends LlmAdapter {
       ...(options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens }),
       ...(options.stop === undefined ? {} : { stop: options.stop }),
     }
-    const response = await fetch(apiUrl(this.issuer, `models/${encodeURIComponent(model.id)}/chat`), {
+    const endpoint = this.desktop
+      ? apiUrl(this.issuer, 'bindings/harness.chat/invoke', 'capability')
+      : apiUrl(this.issuer, `models/${encodeURIComponent(model.id)}/chat`)
+    const requestBody = this.desktop ? { model_id: model.id, ...body } : body
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     })
     if (!response.ok) {
@@ -239,6 +244,7 @@ export function registerPlatformModelProvider(
   issuer: string,
   tokenFor: (provider: string) => string | undefined,
 ): PlatformModelProviderRegistry {
+  const desktop = (ctx.get('profileContext') as { readonly name?: string } | undefined)?.name === 'desktop'
   const routes = new Map<string, () => void>()
   ctx.effect(() => () => {
     for (const dispose of routes.values()) dispose()
@@ -252,6 +258,7 @@ export function registerPlatformModelProvider(
           ctx,
           issuer,
           () => tokenFor(provider),
+          desktop,
         ))
         routes.set(provider, dispose)
       }

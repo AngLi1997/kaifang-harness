@@ -23,23 +23,27 @@ Authenticates multiple KaifangMeta accounts on one shared Web Host. The Host run
 <a id="use-this-package"></a>
 ## Use this package
 
-The Web bundle mounts this Host plugin. Set these environment variables on the shared Web Host:
+The Web bundle mounts this Host plugin and supplies its OAuth settings in its [Cordis patch](../../bundle/web-app/cordis.patch.yml). The plugin accepts these options:
 
-| Variable | Meaning |
-|---|---|
-| `DSH_KAIFANG_IAM_ISSUER` | IAM issuer, such as `https://meta.example/kaifang-meta/iam` |
-| `DSH_KAIFANG_CLIENT_ID` | Registered public client; defaults to `kaifang-harness` |
-| `DSH_KAIFANG_REDIRECT_URI` | The shared Host's exact registered callback URI, ending in `/kaifang/auth/callback` |
-| `DSH_KAIFANG_AUDIENCE` | Platform API audience; defaults to `kaifang-meta-platform` |
-| `DSH_KAIFANG_WORKSPACE_ROOT` | Parent directory for opaque per-user workspace partitions |
+| Field | Default | Meaning |
+|---|---|---|
+| `issuer` | Empty | OIDC issuer URL |
+| `clientId` | `kaifang-harness` | Registered public IAM client |
+| `redirectUri` | Empty | Shared Host callback URI; its local-development values are used as the host-alias template |
+| `audience` | `kaifang-meta-platform` | Platform API audience |
+| `requiredScopes` | `['model:invoke']` | Scopes the user must grant |
+| `refreshSkewSeconds` | `60` | Refresh access tokens this many seconds before expiry |
+| `requestTimeoutMs` | `10000` | Timeout for one IAM request, in milliseconds |
 
-The client registration must allow `authorization_code` and `refresh_token`, one exact shared callback URI, and the `model:invoke` scope. The callback URL must use HTTPS outside loopback development. Keep the Host credential store accessible only to the service process.
+The client registration must allow `authorization_code`, `refresh_token`, an exact loopback callback template ending in `/kaifang/auth/callback`, and the `model:invoke` scope. Production accepts exact callback URIs. Local Harness development reuses that template's scheme, port, path, and query while using the current localhost, loopback, or private-IP hostname for browser authorization and callback. Callback URLs must use HTTPS outside local development. Keep the Host credential store accessible only to the service process.
 
-Production uses a dedicated HTTPS hostname for Harness. OAuth routes live under `/kaifang/auth/*`, successful sign-in returns to `/`, and Host RPC stays at `/api`; the login cookie therefore uses that hostname's root path. The browser plugin checks `/kaifang/auth/status` on startup and connection reset, then redirects unauthenticated users to `/kaifang/auth/entry`. When IAM is not configured, the plugin permits loopback development only; an exposed listener fails to start.
+The Web bundle's checked-in `issuer` and `redirectUri` target local KaifangMeta development. Adjust the patch values for another deployment; see the [Web bundle deployment guidance](../../bundle/web-app/README.md#public-deployments).
+
+Production uses a dedicated HTTPS hostname for Harness. OAuth routes live under `/kaifang/auth/*`, successful sign-in returns to `/`, and Host RPC stays at `/api`; the login cookie therefore uses that hostname's root path. The browser plugin checks `/kaifang/auth/status` on startup and connection reset, then redirects unauthenticated users to `/kaifang/auth/entry`. When IAM is not configured, the plugin permits loopback development only; an exposed listener fails to start. To access the local Web Host by LAN IP, run `pnpm run dev:web -- --host <local-interface-IP>`; the listener binds one concrete address and rejects wildcards.
 
 ## Understand the implementation
 
-The Host creates state and a PKCE verifier, redirects the browser to IAM, exchanges the callback code server-side, validates the signed-token claims returned over the configured issuer connection, and reads `/userinfo`. It stores the refresh token as a `grant` credential and renews it before access-token expiry. The browser receives only the account profile and an HttpOnly DSH Host cookie.
+The Host creates state and a PKCE verifier, redirects the browser to IAM, exchanges the callback code server-side, validates the signed-token claims returned over the configured issuer connection, and reads `/userinfo`. For local aliases, the browser authorization URL and callback use the current host while the token retains the configured canonical issuer. It stores the refresh token as a `grant` credential and renews it before access-token expiry. The browser receives only the account profile and an HttpOnly DSH Host cookie; local same-site development uses a Lax cookie, while cross-site iframe callbacks use `SameSite=None; Secure; Partitioned` and remain partitioned by top-level site.
 
 The admission provider runs inside Connection admission, so it selects the correct `kaifang-user` Peer for both `/api` requests and Gateway WebSocket upgrades. The login, callback, status, cancel, and logout routes use Connection's Host/Origin trust fence but remain reachable before platform sign-in.
 
@@ -50,6 +54,8 @@ The Host provides `ctx.kaifangPlatformAuth`; Host integrations pass the current 
 ## Model Experience
 
 After sign-in, the Host registers a model route for the current tenant and user. It lists enabled chat and vision models through KaifangMeta, defaults new Sessions to the first available model, and sends model requests back through Meta's server-side proxy. Settings → Models shows the models returned by the current Peer's Session catalog and provides a manual refresh. Provider keys never enter the browser. Model permission is checked again by Meta for every request.
+
+The Desktop profile sends platform-model requests to Meta's `harness.chat` capability proxy. Web Host sessions use the AI model proxy. Models configured directly in DSH keep their native providers.
 
 #### KV Cache effect
 
