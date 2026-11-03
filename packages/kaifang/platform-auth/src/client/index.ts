@@ -28,6 +28,24 @@ export const inject = ['slots', 'locale', 'remote', 'remote.session']
 /** Register the account-scoped platform model list under Settings → Models. */
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'kaifang-platform-auth: model catalog copy')
+  let redirecting = false
+  const checkLogin = async (): Promise<void> => {
+    if (redirecting) return
+    try {
+      const response = await fetch('/kaifang/auth/status', { headers: { accept: 'application/json' } })
+      if (!response.ok) return
+      const status: unknown = await response.json()
+      if (typeof status !== 'object' || status === null || !('configured' in status) || !('account' in status)) return
+      if (status.configured === true && status.account === null) {
+        redirecting = true
+        window.location.replace('/kaifang/auth/entry')
+      }
+    } catch (_unavailable) {
+      // A transient Host failure is retried when the client connection resets.
+    }
+  }
+  void checkLogin()
+  ctx.effect(() => ctx.on('connection/reset', () => { void checkLogin() }), 'kaifang-platform-auth: login redirect')
   const catalog = createSnapshotStore<PlatformModelsState>({ loading: true, error: null, groups: [] })
   let pageLoaded = false
   let pending: Promise<void> | undefined

@@ -64,7 +64,7 @@ dsh --profile web --no-open --port 8080
 
 默认情况下 GUI 只监听 loopback，只接受本机的连接。只有 `--host` 会改变监听器：它接受一个具体的本机 IPv4 或 IPv6 地址，不接受通配地址。未启用 TLS 的非 loopback 监听器提供明文 HTTP，并在启动时警告，即使前置 HTTPS 的 `--public-url` 也不例外。Host/Origin 栅栏接受绑定 IP 本身；其他非 loopback authority 需要 `--trusted-host`，因此远端浏览器要么经由剥离前缀的代理访问 GUI，要么通过以可信主机名呈现的端口转发客户端访问。启动 token 交换与签名会话 cookie 认证每个 API 方法与 WebSocket 流。
 
-托管部署使用一个共享 Web Host，并挂载 [`kaifang-platform-auth`](../../kaifang/platform-auth/README.zh.md)。配置 `DSH_KAIFANG_IAM_ISSUER`、共享 Host 的 `DSH_KAIFANG_REDIRECT_URI` 与每用户工作区根目录 `DSH_KAIFANG_WORKSPACE_ROOT`；在 `kaifang-harness` 公共 IAM 客户端中登记一个精确回调地址与 `model:invoke` scope。OAuth 令牌只保存在 Host credential store 中，Connection 按浏览器登录 Cookie 为 HTTP RPC 和 WebSocket 选择用户 Peer。会话和工作区按用户归属过滤。未配置 IAM 时只能使用 loopback 监听器。
+托管部署使用一个共享 Web Host，并挂载 [`kaifang-platform-auth`](../../kaifang/platform-auth/README.zh.md)。配置 `DSH_KAIFANG_IAM_ISSUER`、共享 Host 的 `DSH_KAIFANG_REDIRECT_URI` 与每用户工作区根目录 `DSH_KAIFANG_WORKSPACE_ROOT`；在 `kaifang-harness` 公共 IAM 客户端中登记一个精确回调地址与 `model:invoke` scope。浏览器插件会在启动和连接重置时检查 `/kaifang/auth/status`，并将未登录用户跳转到 `/kaifang/auth/entry`。OAuth token 保存在 Host credential store 中，Connection 按浏览器登录 Cookie 为 HTTP RPC 和 WebSocket 选择用户 Peer。会话和工作区按用户归属过滤。未配置 IAM 时只能使用 loopback 监听器。
 
 Web 用户的会话模型选择按 Agent 会话生效；共享 Host 的全局设置与凭据对 Web 用户只读。工作区根目录只隔离 DSH 持久会话文件。终端和文件工具如果可以执行任意命令，部署方仍需配置每用户 OS 容器或沙箱，避免 Agent 访问服务进程权限下的其他文件。
 

@@ -35,7 +35,7 @@ The Web bundle mounts this Host plugin. Set these environment variables on the s
 
 The client registration must allow `authorization_code` and `refresh_token`, one exact shared callback URI, and the `model:invoke` scope. The callback URL must use HTTPS outside loopback development. Keep the Host credential store accessible only to the service process.
 
-Production uses a dedicated HTTPS hostname for Harness. OAuth routes live under `/kaifang/auth/*`, successful sign-in returns to `/`, and Host RPC stays at `/api`; the login cookie therefore uses that hostname's root path. When IAM is not configured, the plugin permits loopback development only; an exposed listener fails to start. The account overlay starts login in a new tab and checks the Host status route until OAuth returns.
+Production uses a dedicated HTTPS hostname for Harness. OAuth routes live under `/kaifang/auth/*`, successful sign-in returns to `/`, and Host RPC stays at `/api`; the login cookie therefore uses that hostname's root path. The browser plugin checks `/kaifang/auth/status` on startup and connection reset, then redirects unauthenticated users to `/kaifang/auth/entry`. When IAM is not configured, the plugin permits loopback development only; an exposed listener fails to start.
 
 ## Understand the implementation
 

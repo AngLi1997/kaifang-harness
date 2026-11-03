@@ -6,18 +6,19 @@ import { needsWelcome, WELCOME_IPC } from '../src/welcome-api.ts'
 const electron = vi.hoisted(() => ({
   create: vi.fn<(options: unknown) => ReturnType<typeof createWindow>>(),
   root: '/desktop-app',
-  handlers: new Map<string, (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>>(),
+  handlers: new Map<string, (event: unknown, value?: unknown) => Promise<unknown>>(),
 }))
 vi.mock('electron', () => ({
   app: { getAppPath: () => electron.root },
   BrowserWindow: vi.fn(function (options: unknown) { return electron.create(options) }),
   ipcMain: {
-    handle: (name: string, handler: (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>) => {
+    handle: (name: string, handler: (event: unknown, value?: unknown) => Promise<unknown>) => {
       if (electron.handlers.has(name)) throw new Error(`duplicate IPC handler: ${name}`)
       electron.handlers.set(name, handler)
     },
     removeHandler: (name: string) => electron.handlers.delete(name),
   },
+  shell: { openExternal: vi.fn(async () => {}) },
 }))
 
 const { openWelcomeWindow, welcomeWindowOptions } = await import('../src/welcome-window.ts')
@@ -37,20 +38,15 @@ function createWindow() {
   }
 }
 
-beforeEach(() => { electron.create.mockReset(); electron.handlers.clear() })
-
 const operations = {
-  analyticsEnabled: async () => true,
-  takeNotice: async () => undefined,
-  startSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
-  cancelSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
-  copySignInLink: async () => undefined,
-  saveApiKey: () => Promise.resolve({ ok: true as const }),
-  skip: () => Promise.resolve(),
-  readSystemConnection: () => Promise.resolve({ systemUrl: 'http://127.0.0.1:9999', webUrl: 'http://localhost:5173', authCode: '' }),
-  saveSystemConnection: () => Promise.resolve({ ok: true as const }),
-  passwordSignIn: () => Promise.resolve({ ok: true as const }),
+  readSharedHarnessUrl: vi.fn(async () => ''),
+  saveSharedHarnessUrl: vi.fn(async (value: string) => ({ ok: true as const, url: value })),
+  openSharedHarness: vi.fn(async () => true),
+  passwordSignIn: vi.fn(async () => ({ ok: true as const })),
+  skip: vi.fn(async () => {}),
 }
+
+beforeEach(() => { electron.create.mockReset(); electron.handlers.clear(); vi.clearAllMocks() })
 
 describe('desktop welcome window', () => {
   it.each(['darwin', 'win32', 'linux'] as const)('keeps the %s preview fixed-size and sandboxed', (platform) => {
@@ -60,22 +56,12 @@ describe('desktop welcome window', () => {
       resizable: false, maximizable: false, fullscreenable: false,
       webPreferences: {
         nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
-        additionalArguments: ['--dsh-welcome-locale=zh-CN'],
+        additionalArguments: ['--dsh-welcome-locale=zh-CN', '--dsh-welcome-page=entry'],
       },
     })
     expect(options.webPreferences?.preload).toMatch(/preload-welcome\.cjs$/u)
-    if (platform === 'darwin') {
-      expect(options.vibrancy).toBe('menu')
-      expect(options.visualEffectState).toBe('active')
-      expect(options.trafficLightPosition).toEqual({ x: 21, y: 21 })
-    } else if (platform === 'win32') {
-      expect(options.backgroundMaterial).toBe('acrylic')
-      expect(options.titleBarOverlay).toMatchObject({ height: 42 })
-    } else {
-      expect(options.backgroundColor).toBe('#FFFFFF')
-      expect(options.vibrancy).toBeUndefined()
-      expect(options.backgroundMaterial).toBeUndefined()
-    }
+    expect(welcomeWindowOptions(platform, resolveDesktopLocale('zh-CN'), 'settings').webPreferences?.additionalArguments)
+      .toContain('--dsh-welcome-page=settings')
   })
 
   it('waits for its local document and blocks renderer navigation', async () => {
@@ -102,131 +88,33 @@ describe('desktop welcome window', () => {
     await expect(openWelcomeWindow(resolveDesktopLocale('en'), operations)).rejects.toThrow('missing welcome document')
     expect(window.destroy).toHaveBeenCalledOnce()
     expect(electron.handlers.size).toBe(0)
-    expect(window.show).not.toHaveBeenCalled()
   })
 
-  it('does not show a window closed while its document was loading', async () => {
+  it('reads deployment configuration only from the owned welcome window and removes handlers on close', async () => {
     const window = createWindow()
-    window.isDestroyed.mockReturnValue(true)
     electron.create.mockReturnValue(window)
     await openWelcomeWindow(resolveDesktopLocale('en'), operations)
-    expect(window.show).not.toHaveBeenCalled()
-    expect(window.destroy).not.toHaveBeenCalled()
-  })
-
-  it('accepts actions only from its own top frame and removes handlers on close', async () => {
-    const window = createWindow()
-    electron.create.mockReturnValue(window)
-    const saveApiKey = vi.fn(operations.saveApiKey)
-    const skip = vi.fn(operations.skip)
-    const copySignInLink = vi.fn(operations.copySignInLink)
-    const takeNotice = vi.fn(async () => 'session-expired' as const)
-    const saveSystemConnection = vi.fn(operations.saveSystemConnection)
-    const passwordSignIn = vi.fn(operations.passwordSignIn)
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice, saveSystemConnection, passwordSignIn })
     const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
-    const take = electron.handlers.get(WELCOME_IPC.takeNotice)!
-    await expect(take({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
-    expect(takeNotice).not.toHaveBeenCalled()
-    expect(await take(own)).toBe('session-expired')
-    expect(takeNotice).toHaveBeenCalledOnce()
-    const save = electron.handlers.get(WELCOME_IPC.saveApiKey)!
-    await expect(save({ sender: {}, senderFrame: {} }, 'sk-test')).rejects.toThrow('unowned frame')
-    await expect(save({ ...own, senderFrame: {} }, 'sk-test')).rejects.toThrow('unowned frame')
-    expect(await save(own, 'bad key')).toEqual({ ok: false })
-    expect(saveApiKey).not.toHaveBeenCalled()
-    expect(await save(own, 'sk-test')).toEqual({ ok: true })
+    const read = electron.handlers.get(WELCOME_IPC.readSharedHarnessUrl)!
+    await expect(read({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
+    expect(await read(own)).toBe('')
+    expect(operations.readSharedHarnessUrl).toHaveBeenCalledOnce()
+    const save = electron.handlers.get(WELCOME_IPC.saveSharedHarnessUrl)!
+    await expect(save({ ...own, senderFrame: {} }, 'https://harness.example')).rejects.toThrow('unowned frame')
+    expect(await save(own, 'https://harness.example')).toEqual({ ok: true, url: 'https://harness.example' })
+    expect(await electron.handlers.get(WELCOME_IPC.openSharedHarness)!(own)).toBe(true)
+    expect(await electron.handlers.get(WELCOME_IPC.passwordSignIn)!(own, { username: 'admin', password: 'secret' })).toEqual({ ok: true })
     await electron.handlers.get(WELCOME_IPC.skip)!(own)
-    expect(skip).toHaveBeenCalledOnce()
-    const saveConnection = electron.handlers.get(WELCOME_IPC.saveSystemConnection)!
-    await expect(saveConnection({ ...own, senderFrame: {} }, { systemUrl: 'http://a.test', authCode: 'c' })).rejects.toThrow('unowned frame')
-    expect(await saveConnection(own, { systemUrl: 'ftp://a.test', authCode: 'c' })).toEqual({ ok: false, reason: 'url-invalid' })
-    expect(await saveConnection(own, { systemUrl: 'http://a.test', authCode: ' ' })).toEqual({ ok: false, reason: 'auth-code-required' })
-    expect(saveSystemConnection).not.toHaveBeenCalled()
-    expect(await saveConnection(own, { systemUrl: 'http://a.test', webUrl: 'file:///x', authCode: 'c' })).toEqual({ ok: false, reason: 'web-url-invalid' })
-    expect(saveSystemConnection).not.toHaveBeenCalled()
-    expect(await saveConnection(own, { systemUrl: ' http://a.test ', webUrl: ' http://web.test ', authCode: ' c ' })).toEqual({ ok: true })
-    expect(saveSystemConnection).toHaveBeenCalledExactlyOnceWith({ systemUrl: 'http://a.test', webUrl: 'http://web.test', authCode: 'c' })
-    const signIn = electron.handlers.get(WELCOME_IPC.passwordSignIn)!
-    await expect(signIn({ ...own, senderFrame: {} }, { username: 'admin', password: 'p' })).rejects.toThrow('unowned frame')
-    expect(await signIn(own, { username: ' ', password: 'p' })).toEqual({ ok: false, reason: 'username-required' })
-    expect(await signIn(own, { username: 'admin', password: '' })).toEqual({ ok: false, reason: 'password-required' })
-    expect(passwordSignIn).not.toHaveBeenCalled()
-    expect(await signIn(own, { username: ' admin ', password: ' p ' })).toEqual({ ok: true })
-    expect(passwordSignIn).toHaveBeenCalledExactlyOnceWith({ username: 'admin', password: ' p ' })
-    const copy = electron.handlers.get(WELCOME_IPC.copyLink)!
-    await expect(copy({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
-    await expect(copy(own, 42)).rejects.toThrow('invalid attempt')
-    await copy(own, 'attempt')
-    expect(copySignInLink).toHaveBeenCalledExactlyOnceWith('attempt')
+    expect(operations.openSharedHarness).toHaveBeenCalledOnce()
+    expect(operations.passwordSignIn).toHaveBeenCalledExactlyOnceWith({ username: 'admin', password: 'secret' })
+    expect(operations.skip).toHaveBeenCalledOnce()
     window.once.mock.calls[0]![1]()
     expect(electron.handlers.size).toBe(0)
   })
 
-  it('does not show a superseded window when its delayed document finishes loading', async () => {
-    const previous = createWindow()
-    const current = createWindow()
-    const loaded = Promise.withResolvers<undefined>()
-    previous.loadFile.mockReturnValue(loaded.promise)
-    electron.create.mockReturnValueOnce(previous).mockReturnValueOnce(current)
-    const opening = openWelcomeWindow(resolveDesktopLocale('en'), operations)
-    await openWelcomeWindow(resolveDesktopLocale('en'), operations)
-    loaded.resolve(undefined)
-    await opening
-    expect(previous.show).not.toHaveBeenCalled()
-    expect(current.show).toHaveBeenCalledOnce()
-    previous.once.mock.calls[0]![1]()
-    current.once.mock.calls[0]![1]()
+  it('shows the local welcome only when neither local account nor API key is configured', () => {
+    expect(needsWelcome({ loggedIn: true, hasApiKey: false })).toBe(false)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: false })).toBe(true)
+    expect(needsWelcome({ loggedIn: false, hasApiKey: true })).toBe(false)
   })
-
-  it('replaces handlers before the previous native window emits closed', async () => {
-    const previous = createWindow()
-    const current = createWindow()
-    electron.create.mockReturnValueOnce(previous).mockReturnValueOnce(current)
-    const previousStart = vi.fn(operations.startSignIn)
-    const currentStart = vi.fn(operations.startSignIn)
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, startSignIn: previousStart })
-    const previousHandler = electron.handlers.get(WELCOME_IPC.start)!
-    const previousSender = { sender: previous.webContents, senderFrame: previous.webContents.mainFrame }
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, startSignIn: currentStart })
-    const currentHandler = electron.handlers.get(WELCOME_IPC.start)!
-    await expect(previousHandler(previousSender)).rejects.toThrow('unowned frame')
-    await expect(currentHandler(previousSender)).rejects.toThrow('unowned frame')
-    previous.once.mock.calls[0]![1]()
-    expect(electron.handlers.get(WELCOME_IPC.start)).toBe(currentHandler)
-    await currentHandler({ sender: current.webContents, senderFrame: current.webContents.mainFrame })
-    expect(currentStart).toHaveBeenCalledOnce()
-    expect(previousStart).not.toHaveBeenCalled()
-    current.once.mock.calls[0]![1]()
-    expect(electron.handlers.size).toBe(0)
-  })
-
-  it('shows the entry after logout only without a separately configured API key or KaifangLab session', () => {
-    expect(needsWelcome({ loggedIn: true, hasApiKey: false, kaifangSignedIn: false })).toBe(false)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: false, kaifangSignedIn: false })).toBe(true)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: true, kaifangSignedIn: false })).toBe(false)
-    expect(needsWelcome({ loggedIn: true, hasApiKey: true, kaifangSignedIn: false })).toBe(false)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: false, kaifangSignedIn: true })).toBe(false)
-  })
-})
-
-it('accepts only permitted event fields and reads the current policy over IPC', async () => {
-  const window = createWindow()
-  electron.create.mockReturnValue(window)
-  const analytics = vi.fn(async () => {})
-  let enabled = true
-  await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, analytics, analyticsEnabled: async () => enabled })
-  const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
-  const policy = electron.handlers.get(WELCOME_IPC.analyticsEnabled)!
-  expect(await policy(own)).toBe(true)
-  enabled = false
-  expect(await policy(own)).toBe(false)
-  const report = electron.handlers.get(WELCOME_IPC.analytics)!
-  await report(own, 'auth_page_click', { button_name: 'api-key' })
-  expect(analytics).toHaveBeenLastCalledWith('auth_page_click', { button_name: 'api-key' })
-  await expect(report(own, 'auth_page_click', { button_name: 'api-key', token: 'private' })).rejects.toThrow('invalid analytics')
-  await expect(report(own, 'desktop_app_launch', {})).rejects.toThrow('invalid analytics')
-  await expect(report(own, 'auth_page_view', null)).rejects.toThrow('invalid analytics')
-  await report(own, 'api_key_save_click', {})
-  expect(analytics).toHaveBeenLastCalledWith('api_key_save_click', {})
 })

@@ -53,6 +53,14 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind('settings.account')
   const page = globalThis as Partial<Record<typeof CONTACT_CONFIG_GLOBAL, unknown>>
   const config = ContactConfig(page[CONTACT_CONFIG_GLOBAL] ?? {})
+  if (!config.kaifangSignIn) {
+    try {
+      localStorage.removeItem('dsh.kaifang.session')
+      localStorage.removeItem('dsh.kaifang.callback')
+    } catch (_unavailable) {
+      // Disabled legacy sign-in must not retain credentials in writable browser storage.
+    }
+  }
   let snapshot: AccountSnapshot = {
     view: undefined, details: undefined, avatar: undefined, failed: false, loginVisible: false, desktopOnboardingVisible: desktop,
   }
@@ -298,6 +306,14 @@ export function apply(ctx: Context): void {
       },
     },
     async start() {
+      if (desktop) {
+        const showSignIn = (globalThis as typeof globalThis & {
+          dshDesktop?: { showSignIn?: () => Promise<void> }
+        }).dshDesktop?.showSignIn
+        if (showSignIn === undefined) throw new Error('Desktop sign-in is unavailable')
+        await showSignIn()
+        return
+      }
       if (kaifang !== undefined) { await kaifang.signIn(); return }
       publish({ ...snapshot, loginVisible: true, loginFailed: false })
       const transport = (globalThis as typeof globalThis & {

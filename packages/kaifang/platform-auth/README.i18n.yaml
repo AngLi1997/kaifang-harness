@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/kaifang/platform-auth/README.md
+/:
+  en: 56809cbeb3e96d1d
+  zh: 0440785469003bb8
+/deepseek-ai-dsh-kaifang-platform-auth:
+  en: bb9cfe4a06d02784
+  zh: e3b1d9fed17e3491
+/deepseek-ai-dsh-kaifang-platform-auth/summary:
+  en: e48571d8508ed594
+  zh: 96f8c331828a0a37
+/deepseek-ai-dsh-kaifang-platform-auth/table-of-contents:
+  en: 3460b3e585e0c020
+  zh: 240d30a48ea6a6d3
+/deepseek-ai-dsh-kaifang-platform-auth/use-this-package:
+  en: 130cdf93beb7c5e6
+  zh: e65694a248d001d7
+/deepseek-ai-dsh-kaifang-platform-auth/understand-the-implementation:
+  en: d39be941309012e4
+  zh: 5dd733411d29695c
+/deepseek-ai-dsh-kaifang-platform-auth/model-experience:
+  en: 07ff1a359f8ece35
+  zh: f8f37c2fe7906a79
+/deepseek-ai-dsh-kaifang-platform-auth/model-experience/kv-cache-effect:
+  en: 4f0eadf94828e66e
+  zh: 9ab358160cac8d5e
+/deepseek-ai-dsh-kaifang-platform-auth/known-limitations-and-deferred-work:
+  en: 401a62905f6168f5
+  zh: 05878d31603b4921

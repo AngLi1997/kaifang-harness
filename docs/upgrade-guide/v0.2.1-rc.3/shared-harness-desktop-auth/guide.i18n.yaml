@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.3/shared-harness-desktop-auth/guide.md
+/:
+  en: 16a534417fffdb04
+  zh: 16a534417fffdb04
+/desktop-replaces-the-kaifanglab-login-bridge:
+  en: 6c8476b14854961c
+  zh: c96d3b442608b3e0
+/desktop-replaces-the-kaifanglab-login-bridge/change:
+  en: ef56a3f9d1b26e19
+  zh: 57608c536f4b6d1f
+/desktop-replaces-the-kaifanglab-login-bridge/migration:
+  en: 9051f667327989ed
+  zh: 9e4585b84e470940

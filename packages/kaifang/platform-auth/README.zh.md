@@ -5,7 +5,7 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-kaifang-platform-auth
 
-English | [中文](README.zh.md)
+[English](README.md) | 中文
 
 ## 概要
 
@@ -13,13 +13,14 @@ English | [中文](README.zh.md)
 
 ## 目录
 
-- [使用方式](#使用方式)
-- [实现说明](#实现说明)
-- [模型体验](#模型体验)
-- [已知限制与后续工作](#已知限制与后续工作)
+- [使用方式](#use-this-package)
+- [实现说明](#understand-the-implementation)
+- [模型体验](#model-experience)
+- [已知限制与后续工作](#known-limitations-and-deferred-work)
 
 -----
 
+<a id="use-this-package"></a>
 <a id="使用方式"></a>
 ## 使用方式
 
@@ -35,8 +36,9 @@ Web bundle 默认挂载此 Host 插件。为共享 Web Host 配置以下环境�
 
 客户端需登记 `authorization_code`、`refresh_token`、共享 Host 的一个精确回调地址和 `model:invoke` scope。除 loopback 开发外，回调地址必须使用 HTTPS。Host credential store 仅服务进程可访问。
 
-生产部署使用 Harness 独立 HTTPS 域名；OAuth 路由位于 `/kaifang/auth/*`，登录后返回应用根路径 `/`，Host RPC 位于 `/api`，因此登录 Cookie 使用该独立域名的根路径。未配置 IAM 时，插件只允许 loopback 开发；对外监听会启动失败。账号登录页在新标签页发起登录，并持续读取 Host 登录状态，直到 OAuth 回调完成。
+生产部署使用 Harness 独立 HTTPS 域名；OAuth 路由位于 `/kaifang/auth/*`，登录后返回应用根路径 `/`，Host RPC 位于 `/api`，因此登录 Cookie 使用该独立域名的根路径。浏览器插件会在启动和连接重置时检查 `/kaifang/auth/status`，并将未登录用户跳转到 `/kaifang/auth/entry`。未配置 IAM 时，插件只允许 loopback 开发；对外监听会启动失败。
 
+<a id="understand-the-implementation"></a>
 ## 实现说明
 
 Host 创建 state 与 PKCE verifier，将浏览器转到 IAM；回调时由 Host 服务端换取授权码，检查由已配置 issuer 返回的签名令牌声明，再读取 `/userinfo`。刷新令牌以 `grant` credential 保存，并在访问令牌过期前续期。浏览器只获得账号资料和 DSH Host 自身的 HttpOnly Cookie。
@@ -47,6 +49,7 @@ Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录�
 
 Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `sub` 与 `tid`，才能读取该用户的身份或访问令牌。访问令牌过期或退出后，该接口不再返回令牌。
 
+<a id="model-experience"></a>
 ## 模型体验
 
 登录后，Host 为当前租户和用户注册独立模型路由，通过 KaifangMeta 获取已启用的对话与视觉模型；新会话默认选第一个可用模型，模型请求再经 Meta 后端代理。设置 → 模型会通过当前 Peer 的 Session 模型目录展示该账号获准使用的模型，并支持手动刷新。模型密钥不会进入浏览器，Meta 会在每次调用时重新检查模型权限。
@@ -55,6 +58,7 @@ Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `
 
 无。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作
 
 - **一个共享 Host 服务多位用户**：无需配置 `expectedSub`；IAM 只登记一次固定回调。会话 ID 按身份加前缀，工作区持久化归属并放在每用户目录下。

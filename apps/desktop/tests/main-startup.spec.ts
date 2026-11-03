@@ -3,7 +3,7 @@ import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
@@ -121,6 +121,7 @@ const harness = await vi.hoisted(async () => {
       this.webContents.mainFrame.url = url
       if (url === 'dsh-app://app/') navigated.resolve()
     }
+    async loadFile(path: string) { this.urls.push(path) }
     static getAllWindows() { return windows.filter(window => !window.destroyed) }
     setMenu() {}
     getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
@@ -542,52 +543,6 @@ describe('desktop main startup', () => {
     expect((await handler(new Request('dsh-app://unknown/update-dialog.html'))).status).toBe(404)
   })
 
-  it('offers KaifangLab sign-out only while a session is stored and removes it on click', async () => {
-    vi.stubGlobal('process', { ...process, platform: 'darwin' })
-    const directory = join(harness.app.getPath('userData'), 'desktop')
-    mkdirSync(directory, { recursive: true })
-    const session = join(directory, 'kaifang-session.json')
-    writeFileSync(session, JSON.stringify({ systemUrl: 'http://127.0.0.1:9999', accessToken: 't', expiresAt: null,
-      user: { username: 'admin', displayName: 'Admin', email: null, avatarUrl: null } }))
-    await readyForUpdate()
-    const latestItems = () => harness.menu.mock.lastCall![0][0]!.submenu as MenuItemConstructorOptions[]
-    await vi.waitFor(() => { expect(latestItems().some(item => item.label === en.kaifangSignOutMenu)).toBe(true) })
-    ;(latestItems().find(item => item.label === en.kaifangSignOutMenu)!.click as () => void)()
-    await vi.waitFor(() => { expect(existsSync(session)).toBe(false) })
-    await vi.waitFor(() => { expect(latestItems().some(item => item.label === en.kaifangSignOutMenu)).toBe(false) })
-    // The default host still reports an API key, so the workspace stays open without the welcome window.
-    expect(harness.windows).toHaveLength(1)
-  })
-
-  it('re-reads the stored KaifangLab profile and publishes only a changed account', async () => {
-    const directory = join(harness.app.getPath('userData'), 'desktop')
-    mkdirSync(directory, { recursive: true })
-    const session = join(directory, 'kaifang-session.json')
-    const user = { username: 'admin', displayName: 'Admin', email: null, avatarUrl: 'http://localhost:5173/favicon.png' }
-    writeFileSync(session, JSON.stringify({ systemUrl: 'http://127.0.0.1:9999', accessToken: 't', expiresAt: null, user }))
-    const { net } = await import('electron')
-    const profile = (data: Record<string, unknown>) => Response.json({ code: 200, data })
-    await readyForUpdate()
-    const send = harness.windows[0]!.webContents.send
-    await vi.waitFor(() => { expect(send).toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, user) })
-    send.mockClear()
-    vi.spyOn(net, 'fetch').mockResolvedValueOnce(profile({ username: 'admin', nickname: 'Admin', avatar: '/favicon.png' }))
-    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
-    expect(send).not.toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, expect.anything())
-    vi.spyOn(net, 'fetch').mockResolvedValueOnce(Response.json({ code: 401 }, { status: 401 }))
-    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
-    expect(send).not.toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, expect.anything())
-    vi.spyOn(net, 'fetch').mockResolvedValueOnce(profile({ username: 'admin', nickname: '新昵称', avatar: '/api/v1/base/avatar/7' }))
-    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
-    const changed = { ...user, displayName: '新昵称', avatarUrl: 'http://localhost:5173/api/v1/base/avatar/7' }
-    expect(send).toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, changed)
-    expect(JSON.parse(readFileSync(session, 'utf8'))).toMatchObject({ accessToken: 't', user: changed })
-    rmSync(session)
-    send.mockClear()
-    await invoke(DESKTOP_IPC.kaifangRefresh, 'app')
-    expect(send).not.toHaveBeenCalledWith(DESKTOP_IPC.kaifangChanged, expect.anything())
-  })
-
   it('installs hidden native DevTools shortcuts in the macOS application menu', async () => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' })
     await readyForUpdate()
@@ -603,7 +558,7 @@ describe('desktop main startup', () => {
     ['darwin', false, 'zh-CN'],
     ['win32', true, 'zh-CN'],
     ['win32', false, 'en-US'],
-  ] as const)('offers the About command before other commands on %s (packaged=%s, locale=%s)', async (platform, packaged, locale) => {
+  ] as const)('keeps the About command after shared Harness controls on %s (packaged=%s, locale=%s)', async (platform, packaged, locale) => {
     vi.stubGlobal('process', { ...process, platform })
     harness.app.isPackaged = packaged
     vi.spyOn(harness.app, 'getLocale').mockReturnValue(locale)
@@ -613,7 +568,10 @@ describe('desktop main startup', () => {
     const submenu = applicationMenuItems()
     const options = harness.app.setAboutPanelOptions.mock.calls[0]![0]
     const expected = JSON.parse(readFileSync(new URL('./expected/about-panel.json', import.meta.url), 'utf8')) as Record<string, unknown>
-    const [about, separator] = submenu
+    expect(submenu.slice(0, 3).map(item => item.label)).toEqual([
+      en.openApplication, en.sharedHarnessSettingsMenu, en.openLocalWorkspaceMenu,
+    ])
+    const [about, separator] = submenu.slice(4, 6)
     expect({ menu: [{ label: about!.label, role: about!.role }, separator], options: { ...options, iconPath: '<app icon>' } })
       .toEqual(expected[`${platform}:${locale}`])
     expect(options.iconPath).toBe(packaged ? join('desktop-test-resources', 'icon.png')
@@ -1253,6 +1211,18 @@ describe('desktop main startup', () => {
     await harness.navigated.promise
     return harness.hosts[0]!
   }
+
+  it('opens native Welcome from the owned product window', async () => {
+    vi.stubEnv('VITE_HARNESS_WEB_URL', 'https://platform.example')
+    await readyForUpdate()
+    const handler = harness.handlers.get(DESKTOP_IPC.showSignIn)!
+    const sender = harness.windows[0]!.webContents
+    await expect(handler({ sender, senderFrame: { url: 'dsh-app://shell/index.html' } })).rejects.toThrow('unowned renderer')
+
+    await Promise.resolve(invoke(DESKTOP_IPC.showSignIn, 'app'))
+    expect(harness.windows.at(-1)!.urls.at(-1)).toContain('renderer/welcome.html')
+    expect(harness.openExternal).not.toHaveBeenCalled()
+  })
 
   it.each([
     ['win32', ['--updated'], true],
@@ -2555,14 +2525,17 @@ it.each(['failed', 'expired'] as const)('focuses DSH once when browser authoriza
   expect(window.focus).toHaveBeenCalledTimes(1)
 })
 
-it.each([['light', false], ['dark', true]] as const)('opens Platform authorization in the effective %s palette', async (theme, shouldUseDarkColors) => {
+it('routes Desktop authorization to the configured Platform Harness entry instead of the DSH authorize URL', async () => {
+  vi.stubEnv('VITE_HARNESS_WEB_URL', 'https://platform.example')
   await import('../src/main.ts')
   await harness.preparing.promise
   harness.prepared.resolve()
   await harness.hostStarted.promise
   harness.hosts[0]!.ready.resolve()
   await Promise.resolve(invoke(DESKTOP_IPC.boot))
-  harness.nativeTheme.shouldUseDarkColors = shouldUseDarkColors
+  await harness.navigated.promise
+  const sharedWindow = harness.windows.find(window => window.urls.includes('https://platform.example/harness'))!
+  sharedWindow.focus.mockClear()
   const state: AccountView = {
     status: 'signed-out', links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' },
     attempt: { id: 'test-theme-attempt' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser',
@@ -2570,7 +2543,9 @@ it.each([['light', false], ['dark', true]] as const)('opens Platform authorizati
   }
   harness.publishAccount(state)
   harness.publishAccount(state)
-  expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(`https://platform.deepseek.com/dsh/authorize?state=state-1&theme=${theme}`)
+  await vi.waitFor(() => { expect(sharedWindow.focus).toHaveBeenCalledOnce() })
+  expect(sharedWindow.focus).toHaveBeenCalledOnce()
+  expect(harness.openExternal).not.toHaveBeenCalledWith(expect.stringContaining('/dsh/authorize'))
 })
 
 it('disables native product events for a disabled Desktop launch', async () => {

@@ -13,7 +13,6 @@ const state = vi.hoisted(() => ({
   dialogLocale: undefined as (() => DesktopLocale) | undefined,
   beforeRead: vi.fn(async () => {}),
   beforeWelcome: vi.fn(async () => {}),
-  copy: vi.fn(),
   expiryListener: undefined as (() => void) | undefined,
   accountListener: undefined as ((value: AccountView) => void) | undefined,
   accountState: vi.fn<() => Promise<AccountView>>().mockResolvedValue({
@@ -49,7 +48,6 @@ vi.mock('../src/crash-report.ts', async importOriginal => ({
   pruneCrashReports: vi.fn(async () => {}),
 }))
 vi.mock('electron', () => ({
-  clipboard: { writeText: state.copy },
   app: {
     isPackaged: false,
     name: 'Harness',
@@ -137,6 +135,7 @@ vi.mock('../src/welcome-backend.ts', () => ({
       watch: (listener: (value: AccountView) => void, _failed: () => void, expired: () => void) => {
         state.accountListener = listener
         state.expiryListener = expired
+        void state.accountState().then(listener)
         return () => {}
       },
       state: state.accountState,
@@ -174,41 +173,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function stubDevelopmentEnvironment(): void {
-  vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
-  vi.stubEnv('DSH_DESKTOP_DEV_PROJECT_DIR', '/development-profile')
-  vi.stubEnv('DSH_DESKTOP_NODE_BINARY', '/runtime/node')
-  vi.stubEnv('DSH_DESKTOP_PNPM_ENTRY', '/runtime/pnpm')
-  vi.stubEnv('DSH_DESKTOP_DSH_DIR', '/runtime/dsh')
-  vi.stubEnv('DSH_DESKTOP_PRIMARY_RUNTIME_DIR', '/runtime/primary-runtime')
-  vi.stubEnv('DSH_DESKTOP_HOST_INSPECT_PORT', undefined)
-  vi.stubEnv('DSH_DESKTOP_OPEN_DEVTOOLS', '0')
-  vi.stubEnv('DSH_DESKTOP_MANDATORY_UPDATE_CONFIG', undefined)
-  vi.stubEnv('DSH_DESKTOP_UPDATE_JOURNAL_DIR', undefined)
-}
-
-it('opens the KaifangLab sign-in page from the workspace and returns to the workspace when it closes', async () => {
-  vi.resetModules()
-  vi.clearAllMocks()
-  state.hasApiKey = true
-  state.operations = undefined
-  stubDevelopmentEnvironment()
-  await import('../src/main.ts')
-  await vi.waitFor(() => { expect(state.showWorkspace).toHaveBeenCalledOnce() })
-  expect(state.beforeWelcome).not.toHaveBeenCalled()
-  const contents = state.contents!
-  await state.handlers.get(DESKTOP_IPC.kaifangSignIn)!({ sender: contents, senderFrame: contents.mainFrame })
-  expect(state.beforeWelcome).toHaveBeenCalledOnce()
-  expect(state.operations).toBeDefined()
-  expect(state.closeWelcome).not.toHaveBeenCalled()
-  expect(state.hideWorkspace).toHaveBeenCalledOnce()
-  for (const [name, callback] of state.welcomeOnce.mock.calls) if (name === 'closed') callback()
-  expect(state.showWorkspace).toHaveBeenCalledTimes(2)
-  expect(state.quit).not.toHaveBeenCalled()
-  state.hasApiKey = false
-})
-
-it.each([false, true])('starts welcome onboarding without carrying update focus into login or skip (Windows update=%s)', async (updated) => {
+it.each([false, true])('starts welcome onboarding without carrying update focus into shared Host or local skip (Windows update=%s)', async (updated) => {
   vi.resetModules()
   vi.clearAllMocks()
   state.preference = 'zh'
@@ -254,22 +219,11 @@ it.each([false, true])('starts welcome onboarding without carrying update focus 
   expect(state.showWorkspace).not.toHaveBeenCalled()
   state.loadWorkspace.mockClear()
   expect(state.welcomeLocale).toMatchObject({ id: 'zh-CN' })
-  expect(await state.operations!.takeNotice()).toBeUndefined()
+  expect(await state.operations!.readSharedHarnessUrl()).toBe('')
+  expect(await state.operations!.openSharedHarness()).toBe(false)
   expect(state.dialogLocale!().id).toBe('zh-CN')
   const attemptId = 'login' as NonNullable<AccountView['attempt']>['id']
-  const account: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' },
-    attempt: { id: attemptId, phase: 'waiting-browser', authorizeUrl: 'https://example.test/login' } }
-  state.accountState.mockResolvedValue(account)
-  await state.operations!.copySignInLink(attemptId)
-  expect(state.copy).toHaveBeenCalledExactlyOnceWith('https://example.test/login?theme=light')
-  state.nativeTheme.shouldUseDarkColors = true
-  await state.operations!.copySignInLink(attemptId)
-  expect(state.copy).toHaveBeenLastCalledWith('https://example.test/login?theme=dark')
-  state.nativeTheme.shouldUseDarkColors = false
-  await expect(state.operations!.copySignInLink('stale' as typeof attemptId)).rejects.toThrow('login link is unavailable')
-  state.accountState.mockResolvedValue({ ...account, attempt: { id: attemptId, phase: 'expired' } })
-  await expect(state.operations!.copySignInLink(attemptId)).rejects.toThrow('login link is unavailable')
-  expect(state.copy).toHaveBeenCalledTimes(2)
+  const account: AccountView = { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' }, attempt: null }
   await state.operations!.skip()
   expect(state.loadWorkspace).not.toHaveBeenCalled()
   expect(state.showWorkspace).toHaveBeenCalledOnce()
@@ -307,21 +261,16 @@ it.each([false, true])('starts welcome onboarding without carrying update focus 
   state.expiryListener!()
   await vi.advanceTimersByTimeAsync(0)
   expect(state.beforeWelcome).toHaveBeenCalledTimes(welcomeCount)
-  expect(await state.operations!.takeNotice()).toBeUndefined()
   state.hasApiKey = false
   state.accountListener!({ ...account, status: 'credential-stored', attempt: null })
   state.accountListener!({ ...account, status: 'signed-out', attempt: null })
   state.expiryListener!()
   await vi.waitFor(() => { expect(state.beforeWelcome).toHaveBeenCalledTimes(welcomeCount + 1) })
-  expect(await state.operations!.takeNotice()).toBe('session-expired')
-  expect(await state.operations!.takeNotice()).toBeUndefined()
   state.accountListener!({ ...account, status: 'signed-out', attempt: null })
   await vi.advanceTimersByTimeAsync(0)
-  expect(await state.operations!.takeNotice()).toBeUndefined()
   state.accountListener!({ ...account, status: 'credential-stored', attempt: null })
   state.accountListener!({ ...account, status: 'signed-out', attempt: null })
   await vi.advanceTimersByTimeAsync(0)
-  expect(await state.operations!.takeNotice()).toBeUndefined()
   state.showWorkspace.mockClear()
   state.focusWorkspace.mockClear()
   vi.stubEnv('DSH_DESKTOP_OPEN_DEVTOOLS', '1')

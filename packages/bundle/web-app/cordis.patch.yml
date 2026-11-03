@@ -135,9 +135,8 @@
     # reports an actionable error when its settings-domain provider is absent.
     - id: ui-settings-account
       name: '@deepseek-ai/dsh-client-ui-settings-account'
-      # The Web app opens on the KaifangLab sign-in page until an account signs in.
       config:
-        kaifangSignIn: true
+        kaifangSignIn: false
 
     - id: account-controller
       name: '@deepseek-ai/dsh-api-account-controller'

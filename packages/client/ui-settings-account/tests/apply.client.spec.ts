@@ -328,17 +328,15 @@ it('coalesces refreshes, publishes independent failures, and rejects stale respo
   expect(actions.hooks.account.getSnapshot()).toMatchObject({ view: undefined, details: undefined })
 }, 60_000)
 
-for (const desktop of [false, true]) it(`uses the browser or Desktop login carrier (Desktop: ${desktop}) and exposes operation errors`, async ({ start, mock }) => {
+it('uses the browser login carrier and exposes operation errors', async ({ start, mock }) => {
   const open = vi.spyOn(window, 'open').mockReturnValue(null)
-  if (desktop) vi.stubGlobal('dshDesktop', {})
   const c = await start()
   const actions = operations(c)
   mock.remote.account.startSignIn.mockResolvedValue(ok(view))
   await actions.start()
   expect(mock.remote.account.startSignIn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en', version: '0.0.0-test' }),
-    window.location.origin, desktop ? 'desktop' : 'web')
-  // Only a plain browser preopens the authorization tab during the click.
-  expect(open).toHaveBeenCalledTimes(desktop ? 0 : 1)
+    window.location.origin, 'web')
+  expect(open).toHaveBeenCalledOnce()
   const failure = { ok: false as const, error: new RemoteError('gateway/internal', 'offline', {}) }
   mock.remote.account.startSignIn.mockResolvedValueOnce(failure)
   await expect(actions.start()).rejects.toThrow('account start failed')
@@ -351,6 +349,20 @@ for (const desktop of [false, true]) it(`uses the browser or Desktop login carri
   await actions.signOut()
   // The launcher renders nothing, so the refused Remote call reaches the caller unchanged.
   await expect(actions.signOut()).rejects.toBe(failure.error)
+}, 60_000)
+
+it('opens native Welcome for Desktop sign-in without starting DeepSeek account auth', async ({ start, mock }) => {
+  const showSignIn = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+  vi.stubGlobal('dshDesktop', { showSignIn })
+  const c = await start()
+  const actions = operations(c)
+  await actions.start()
+  expect(showSignIn).toHaveBeenCalledOnce()
+  expect(mock.remote.account.startSignIn).not.toHaveBeenCalled()
+
+  showSignIn.mockRejectedValueOnce(new Error('Desktop sign-in unavailable'))
+  await expect(actions.start()).rejects.toThrow('Desktop sign-in unavailable')
+  expect(mock.remote.account.startSignIn).not.toHaveBeenCalled()
 }, 60_000)
 
 it('navigates the preopened browser tab to the themed authorization page', async ({ start, mock }) => {
@@ -368,10 +380,10 @@ it('navigates the preopened browser tab to the themed authorization page', async
   await vi.waitFor(() => { expect(replace).toHaveBeenCalledExactlyOnceWith(`${attempt.authorizeUrl}?theme=${theme}`) })
 }, 60_000)
 
-it('uses the Desktop stream origin and exposes the native platform bridge', async ({ start, mock }) => {
-  vi.stubGlobal('dshDesktop', {})
+it('exposes native Platform views and routes Desktop login through native Welcome', async ({ start, mock }) => {
+  const showSignIn = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
+  vi.stubGlobal('dshDesktop', { showSignIn })
   const c = await start()
-  vi.stubGlobal('__DSH_TRANSPORT__', { streamBaseUrl: 'http://localhost:9876/stream' })
   const platform = { open: vi.fn(), setBounds: vi.fn(), close: vi.fn() }
   vi.stubGlobal('dshPlatform', platform)
   await c.reload(SELF)
@@ -397,9 +409,9 @@ it('uses the Desktop stream origin and exposes the native platform bridge', asyn
   host.closePage()
   expect(host.hooks.page.getSnapshot()).toBeNull()
   expect(owner).toHaveBeenCalledExactlyOnceWith('returned')
-  mock.remote.account.startSignIn.mockResolvedValue(ok(view))
   await actions.start()
-  expect(mock.remote.account.startSignIn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en' }), 'http://localhost:9876', 'desktop')
+  expect(showSignIn).toHaveBeenCalledOnce()
+  expect(mock.remote.account.startSignIn).not.toHaveBeenCalled()
 }, 60_000)
 
 
