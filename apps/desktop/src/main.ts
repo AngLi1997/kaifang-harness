@@ -29,7 +29,7 @@ import { installDesktopFileDrag } from './file-drag.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
-import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState, type KaifangAccountView } from './ipc.ts'
+import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState, type HostPlaneView, type KaifangAccountView } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
@@ -40,10 +40,14 @@ import { DesktopCommandManager } from './command-management.ts'
 import { serveWebDocument, authenticateWebHost, forwardWebRequest, resolveDesktopHostForward, desktopHasModelCredentials, desktopFollowTransportAligned } from './web-document.ts'
 import {
   attachSharedHostRemoteClient,
-  desktopBootTransport,
   shouldNotifySharedHostAttachFailure,
   type SharedHostAttachResult,
 } from './shared-host-attach.ts'
+import {
+  desktopDualPlaneBoot,
+  resolvePlaneHosts,
+  type HostPlaneId,
+} from './host-plane.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
@@ -453,13 +457,78 @@ async function main(): Promise<void> {
   let hostCookie: string | undefined
   let localHostUrl: string | undefined
   let localHostCookie: string | undefined
-  /** False while the native shell is a Remote Client of the shared Web Host. */
+  /** False while a shared Host Peer is available (dual-plane or exclusive Remote Client). */
   let ownsHostTransport = true
+  /** Dual-plane: Platform session admitted to shared Host; sidebar shows 本机+云端. */
+  let cloudOnline = false
+  let activePlane: HostPlaneId = 'local'
+  let sharedHostUrl: string | undefined
+  let sharedHostCookie: string | undefined
   const useLocalHostTransport = (): void => {
     if (localHostUrl === undefined || localHostCookie === undefined) return
     hostUrl = localHostUrl
     hostCookie = localHostCookie
     ownsHostTransport = true
+    cloudOnline = false
+    activePlane = 'local'
+    sharedHostUrl = undefined
+    sharedHostCookie = undefined
+  }
+  const applyActivePlane = (): void => {
+    if (!cloudOnline || sharedHostUrl === undefined || sharedHostCookie === undefined
+      || localHostUrl === undefined || localHostCookie === undefined) {
+      useLocalHostTransport()
+      return
+    }
+    const planes = resolvePlaneHosts(activePlane, {
+      localUrl: localHostUrl,
+      localCookie: localHostCookie,
+      cloudUrl: sharedHostUrl,
+      cloudCookie: sharedHostCookie,
+    })
+    hostUrl = planes.active.hostUrl
+    hostCookie = planes.active.hostCookie
+    ownsHostTransport = activePlane === 'local'
+  }
+  const hostPlaneSnapshot = (): HostPlaneView => {
+    const transport = desktopDualPlaneBoot({
+      cloudOnline,
+      activePlane,
+      activeHostUrl: hostUrl ?? localHostUrl ?? 'http://127.0.0.1:0',
+    })
+    return {
+      cloudOnline: transport.cloudOnline,
+      activePlane: transport.activePlane,
+      streamBaseUrl: transport.streamBaseUrl,
+      ownsHost: transport.ownsHost,
+      ...transport.sidecarApiPrefix === undefined ? {} : { sidecarApiPrefix: transport.sidecarApiPrefix },
+    }
+  }
+  const publishHostPlane = (): HostPlaneView => {
+    const view = hostPlaneSnapshot()
+    if (mainWindow !== undefined && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(DESKTOP_IPC.hostPlaneChanged, view)
+    }
+    return view
+  }
+  const markCloudDisconnected = (): HostPlaneView => {
+    const wasOnline = cloudOnline
+    useLocalHostTransport()
+    const view = publishHostPlane()
+    if (wasOnline && mainWindow !== undefined && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(DESKTOP_IPC.cloudDisconnected)
+    }
+    return view
+  }
+  const setActiveHostPlane = (plane: HostPlaneId): HostPlaneView => {
+    if (!cloudOnline) {
+      activePlane = 'local'
+      applyActivePlane()
+      return publishHostPlane()
+    }
+    activePlane = plane
+    applyActivePlane()
+    return publishHostPlane()
   }
   /**
    * When Platform login is available and the shared Host is reachable, point the
@@ -520,10 +589,16 @@ async function main(): Promise<void> {
       }
       await writePlatformSession(userData, session)
     }
-    hostUrl = result.hostUrl
-    hostCookie = result.cookie
-    ownsHostTransport = false
-    console.info('desktop shared Host: native shell connected as Remote Client', new URL(result.hostUrl).origin)
+    sharedHostUrl = result.hostUrl
+    sharedHostCookie = result.cookie
+    cloudOnline = true
+    // Dual-plane (B): default active plane is 本机 so new chats land locally; 云端 is sidecar.
+    activePlane = 'local'
+    applyActivePlane()
+    console.info(
+      'desktop shared Host: dual-plane online (active=local, cloud sidecar)',
+      new URL(result.hostUrl).origin,
+    )
     return result
   }
   const notifySharedHostAttachFailure = async (result: SharedHostAttachResult): Promise<void> => {
@@ -853,6 +928,15 @@ async function main(): Promise<void> {
       }
       // Online Remote Client: plugin bundles stay on the owned Desktop Host (boot
       // injections); /api and auth status use the shared Host kaifang-user Peer.
+      const sidecar = cloudOnline && sharedHostUrl !== undefined && sharedHostCookie !== undefined
+        && localHostUrl !== undefined && localHostCookie !== undefined
+        ? resolvePlaneHosts(activePlane, {
+          localUrl: localHostUrl,
+          localCookie: localHostCookie,
+          cloudUrl: sharedHostUrl,
+          cloudCookie: sharedHostCookie,
+        }).sidecar
+        : undefined
       const forward = resolveDesktopHostForward(url.pathname, {
         ownsHost: ownsHostTransport,
         activeHostUrl: hostUrl,
@@ -860,9 +944,10 @@ async function main(): Promise<void> {
         ...localHostUrl === undefined || localHostCookie === undefined
           ? {}
           : { localHostUrl, localHostCookie },
+        ...sidecar === undefined ? {} : { sidecarHostUrl: sidecar.hostUrl, sidecarHostCookie: sidecar.hostCookie },
       })
       if (forward === undefined) return Promise.resolve(new Response(null, { status: 503 }))
-      return forwardWebRequest(request, forward.hostUrl, forward.hostCookie)
+      return forwardWebRequest(request, forward.hostUrl, forward.hostCookie, forward.pathname)
     }
     return Promise.resolve(new Response(null, { status: 404 }))
   })
@@ -877,8 +962,9 @@ async function main(): Promise<void> {
     assertDesktopSender(event, ['app'])
     await startup
     if (backend.host === undefined || hostUrl === undefined) throw new Error('Desktop Host is unavailable')
-    const transport = desktopBootTransport({
-      ownsHost: ownsHostTransport,
+    const transport = desktopDualPlaneBoot({
+      cloudOnline,
+      activePlane,
       activeHostUrl: hostUrl,
     })
     if (!desktopFollowTransportAligned({
@@ -892,6 +978,9 @@ async function main(): Promise<void> {
       injections,
       streamBaseUrl: transport.streamBaseUrl,
       ownsHost: transport.ownsHost,
+      cloudOnline: transport.cloudOnline,
+      activePlane: transport.activePlane,
+      ...transport.sidecarApiPrefix === undefined ? {} : { sidecarApiPrefix: transport.sidecarApiPrefix },
     }
   })
 
@@ -925,16 +1014,29 @@ async function main(): Promise<void> {
   })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://*/*', 'wss://*/*'] }, (details, callback) => {
-    if (hostUrl === undefined || hostCookie === undefined || details.webContentsId !== mainWindow?.webContents.id) {
+    if (details.webContentsId !== mainWindow?.webContents.id) {
       callback({})
       return
     }
-    const target = new URL(hostUrl)
     const requested = new URL(details.url)
-    if (requested.host !== target.host || requested.protocol !== (target.protocol === 'https:' ? 'wss:' : 'ws:')) { callback({}); return }
+    const candidates: { url: string; cookie: string }[] = []
+    if (hostUrl !== undefined && hostCookie !== undefined) candidates.push({ url: hostUrl, cookie: hostCookie })
+    if (sharedHostUrl !== undefined && sharedHostCookie !== undefined) {
+      candidates.push({ url: sharedHostUrl, cookie: sharedHostCookie })
+    }
+    if (localHostUrl !== undefined && localHostCookie !== undefined) {
+      candidates.push({ url: localHostUrl, cookie: localHostCookie })
+    }
+    const matched = candidates.find((candidate) => {
+      const target = new URL(candidate.url)
+      return requested.host === target.host
+        && requested.protocol === (target.protocol === 'https:' ? 'wss:' : 'ws:')
+    })
+    if (matched === undefined) { callback({}); return }
     const headers = Object.fromEntries(Object.entries(details.requestHeaders).map(([name, value]) => [name.toLowerCase(), value]))
     if (headers.origin !== 'dsh-app://app') { callback({ cancel: true }); return }
-    callback({ requestHeaders: { ...headers, origin: target.origin, cookie: hostCookie, 'sec-fetch-site': 'same-origin' } })
+    const target = new URL(matched.url)
+    callback({ requestHeaders: { ...headers, origin: target.origin, cookie: matched.cookie, 'sec-fetch-site': 'same-origin' } })
   })
 
   const assertMainApplication = (event: IpcMainInvokeEvent): BrowserWindow => {
@@ -1568,6 +1670,17 @@ async function main(): Promise<void> {
     assertProductSender(event)
     await refreshPlatformAccount()
   })
+  ipcMain.handle(DESKTOP_IPC.hostPlaneSet, async (event, plane: unknown) => {
+    assertProductSender(event)
+    await startup
+    if (plane === 'current') return hostPlaneSnapshot()
+    if (plane === 'cloud-lost') return markCloudDisconnected()
+    if (plane !== 'local' && plane !== 'cloud') {
+      throw new Error('dsh desktop: host plane must be local or cloud')
+    }
+    return setActiveHostPlane(plane)
+  })
+
   const passwordSignIn = async ({ username, password }: PlatformPasswordCredentials): Promise<PlatformPasswordSignInResult> => {
     if (username.trim() === '') return { ok: false, reason: 'username-required' }
     if (password === '') return { ok: false, reason: 'password-required' }

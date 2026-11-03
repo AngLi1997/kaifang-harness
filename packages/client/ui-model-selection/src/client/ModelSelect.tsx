@@ -44,6 +44,31 @@ import type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
 
+function useDualPlaneMenu(): {
+  cloudOnline: boolean
+  activePlane: 'local' | 'cloud'
+  sidecarGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
+} {
+  return useSyncExternalStore(
+    (fn) => {
+      const store = (globalThis as { __DSH_DUAL_PLANE__?: { subscribe(fn: () => void): () => void } }).__DSH_DUAL_PLANE__
+      return store?.subscribe(fn) ?? (() => {})
+    },
+    () => {
+      const snap = (globalThis as { __DSH_DUAL_PLANE__?: { getSnapshot(): {
+        cloudOnline: boolean
+        activePlane: 'local' | 'cloud'
+        sidecarModelGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
+      } } }).__DSH_DUAL_PLANE__?.getSnapshot()
+      return {
+        cloudOnline: snap?.cloudOnline === true,
+        activePlane: snap?.activePlane === 'cloud' ? 'cloud' as const : 'local' as const,
+        sidecarGroups: snap?.sidecarModelGroups ?? [],
+      }
+    },
+  )
+}
+
 /** Which pane the dropdown shows: the two-row root or one drilled-in list. */
 type Pane = 'root' | 'model' | 'effort'
 
@@ -93,6 +118,7 @@ export function ModelSelect(
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const id = useId()
 
+  const dualPlane = useDualPlaneMenu()
   const accountProviderName = t('provider.account')
   const groups = useMemo(() => orderModelProviders(state.groups).map(group => ({
     ...group,
@@ -579,6 +605,11 @@ export function ModelSelect(
                 aria-label={t('menu.model')}
                 hidden={filteredGroups.length === 0}
               >
+                {dualPlane.cloudOnline && (
+                  <div className={css.planeSection} data-host-plane={dualPlane.activePlane}>
+                    {dualPlane.activePlane === 'local' ? '本机' : '云端'}
+                  </div>
+                )}
                 {filteredGroups.map((group) => {
                   return (
                     <MenuGroup key={group.id} label={group.provider.name}>
@@ -622,6 +653,25 @@ export function ModelSelect(
                   )
                 })}
               </div>
+              {dualPlane.cloudOnline && (
+                <>
+                  <div className={css.planeSection} data-host-plane={dualPlane.activePlane === 'local' ? 'cloud' : 'local'}>
+                    {dualPlane.activePlane === 'local' ? '云端' : '本机'}
+                  </div>
+                  {dualPlane.sidecarGroups.length === 0
+                    ? <button type="button" className={css.item} disabled>{dualPlane.activePlane === 'local' ? '云端不可用' : '本机不可用'}</button>
+                    : dualPlane.sidecarGroups.flatMap(group => group.models.map(model => (
+                      <button
+                        key={`sidecar-${group.id}-${model.id}`}
+                        type="button"
+                        className={css.item}
+                        disabled
+                      >
+                        <span className={css.itemLabel}>{model.name}</span>
+                      </button>
+                    )))}
+                </>
+              )}
               {state.status === 'ready' && filteredGroups.length === 0 && (
                 <div className={css.empty} role="status">{t(choices.length === 0 ? 'empty.models' : 'search.empty')}</div>
               )}

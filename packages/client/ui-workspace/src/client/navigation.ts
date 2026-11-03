@@ -18,11 +18,13 @@ import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {
   IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import { DEFAULT_WORKSPACE_DIRECTORY } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
+import { readHostPlaneTransport } from './host-planes/transport.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
 
 interface MainSelection {
@@ -376,7 +378,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const recent = workspace.phase === 'ready' && sessions.phase === 'ready'
       ? recentWorkspace(workspace.items, sessions.byId)
       : undefined
-    const target = workspaceId ?? currentWorkspaceId ?? recent
+    // Dual-plane Desktop: new chats on 本机 prefer the Host default workspace
+    // over a cross-plane "recent" so ops stay on the local default.
+    const plane = readHostPlaneTransport()
+    const preferLocalDefault = plane?.cloudOnline === true && plane.activePlane === 'local'
+    const defaultWorkspaceId = preferLocalDefault
+      ? workspace.items.find(item => item.title === DEFAULT_WORKSPACE_DIRECTORY)?.workspaceId
+      : undefined
+    const target = workspaceId ?? currentWorkspaceId ?? defaultWorkspaceId ?? recent
     if (target === undefined) {
       if (initializeDraft) {
         this.notify({ kind: 'createFailed', message: this.ctx.locale.bind('workspace')('draft.workspaceRequired') })

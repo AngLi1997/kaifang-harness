@@ -9,7 +9,7 @@
  * occupant's own create-folder affordance already covers creating one.
  */
 import type { ReactNode, RefObject } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import {
   Button, IconFolderCloseRegular, IconPlusOutlineRegular, Menu, Modal, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -21,6 +21,7 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import { distinguishingPathSuffixes } from './path-suffix.ts'
 import css from './WorkspacePicker.module.css'
+import { dualPlaneStore, setActivePlane } from './host-planes/index.ts'
 
 const ADD_WORKSPACE = '::add-workspace'
 const NO_WORKSPACE = '::no-workspace'
@@ -113,6 +114,18 @@ export function WorkspacePickFlow({
     : []
   const defaultWorkspaceName = t('workspace.defaultName')
   const defaultWorkspace = workspaces.find(workspace => workspace.title === DEFAULT_WORKSPACE_DIRECTORY)
+  const dualPlane = useSyncExternalStore(
+    fn => dualPlaneStore.subscribe(fn),
+    () => dualPlaneStore.getSnapshot(),
+  )
+  const showPlanes = !addOnly && dualPlane.cloudOnline
+  const sidecarWorkspaces = useMemo(() => {
+    const byId = new Map<string, string>()
+    for (const row of dualPlane.sidecarSessions) {
+      if (!byId.has(row.workspaceId)) byId.set(row.workspaceId, row.workspaceTitle)
+    }
+    return [...byId.entries()].map(([id, title]) => ({ id, title }))
+  }, [dualPlane.sidecarSessions])
   // When initializeDefault already lists the default Workspace, its row is the
   // one "Default workspace" entry — do not also offer the unassigned sentinel.
   const unassignedEntries: MenuEntry[] = allowUnassigned && defaultWorkspace === undefined
@@ -132,23 +145,35 @@ export function WorkspacePickFlow({
     const suffixes = distinguishingPathSuffixes(rows)
     return rows.map(row => ({ ...row, suffix: suffixes.get(row.id) }))
   }, [pinFooter, workspaces, defaultWorkspaceName])
+  const toWorkspaceItem = (id: string, title: string, path?: string, suffix?: string): MenuEntry => ({
+    id,
+    label: path === undefined || suffix === undefined
+      ? title
+      : (
+        <span className={css.disambiguated} title={path}>
+          <span className={css.title}>{title}</span>
+          {' '}
+          <span className={css.pathSuffix}>{suffix}</span>
+        </span>
+      ),
+    icon: <IconFolderCloseRegular size={16} />,
+    disabled: flowBusy,
+  })
+  const activePlaneItems: MenuEntry[] = listed.map(({ id, title, path, suffix }) =>
+    toWorkspaceItem(id, title, path, suffix))
+  const localSidecarItems: MenuEntry[] = sidecarWorkspaces.map(({ id, title }) =>
+    toWorkspaceItem(`::plane:local:${id}`, title))
+  const cloudSidecarItems: MenuEntry[] = sidecarWorkspaces.map(({ id, title }) =>
+    toWorkspaceItem(`::plane:cloud:${id}`, title))
   const items: MenuEntry[] = pinFooter
-    ? listed.map(({ id, title, path, suffix }) => ({
-      id,
-      // The title gives way first, so the suffix that tells the rows apart
-      // stays visible; the native tooltip carries the full path.
-      label: suffix === undefined
-        ? title
-        : (
-          <span className={css.disambiguated} title={path}>
-            <span className={css.title}>{title}</span>
-            {' '}
-            <span className={css.pathSuffix}>{suffix}</span>
-          </span>
-        ),
-      icon: <IconFolderCloseRegular size={16} />,
-      disabled: flowBusy,
-    }))
+    ? showPlanes
+      ? [
+        { type: 'label', id: 'plane-local', text: t('plane.local') },
+        ...dualPlane.activePlane === 'local' ? activePlaneItems : localSidecarItems,
+        { type: 'label', id: 'plane-cloud', text: t('plane.cloud') },
+        ...dualPlane.activePlane === 'cloud' ? activePlaneItems : cloudSidecarItems,
+      ]
+      : activePlaneItems
     : addOnly ? addEntries : [
       ...unassignedEntries,
       ...(unassignedEntries.length > 0 && addEntries.length > 0
@@ -231,6 +256,13 @@ export function WorkspacePickFlow({
     }
     if (id === ADD_WORKSPACE) {
       openDirectoryFlow()
+      return
+    }
+    const planePick = /^::plane:(local|cloud):(.+)$/.exec(id)
+    if (planePick !== null) {
+      const plane = planePick[1] as 'local' | 'cloud'
+      const workspaceId = planePick[2] as WorkspaceId
+      void setActivePlane(plane).then(() => { onPick(workspaceId) })
       return
     }
     onPick(id as WorkspaceId)

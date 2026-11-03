@@ -2,7 +2,7 @@
 
 import type { DesktopShortcutInput, ShortcutConfigSnapshot, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation, type KaifangAccountView } from './ipc.ts'
+import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation, type HostPlaneId, type HostPlaneView, type KaifangAccountView } from './ipc.ts'
 import { PLATFORM_IPC } from './platform-ipc.ts'
 import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
 import { syncNativeTheme } from './preload-theme.ts'
@@ -37,6 +37,21 @@ function createProductApi(): DshDesktopProductApi {
         const handle = (_event: Electron.IpcRendererEvent, account: KaifangAccountView | null): void => { listener(account) }
         ipcRenderer.on(DESKTOP_IPC.kaifangChanged, handle)
         return () => { ipcRenderer.off(DESKTOP_IPC.kaifangChanged, handle) }
+      },
+    },
+    hostPlane: {
+      current: () => ipcRenderer.invoke(DESKTOP_IPC.hostPlaneSet, 'current') as Promise<HostPlaneView>,
+      setActive: (plane: HostPlaneId) => ipcRenderer.invoke(DESKTOP_IPC.hostPlaneSet, plane) as Promise<HostPlaneView>,
+      reportCloudLost: () => ipcRenderer.invoke(DESKTOP_IPC.hostPlaneSet, 'cloud-lost') as Promise<HostPlaneView>,
+      subscribe(listener) {
+        const handle = (_event: Electron.IpcRendererEvent, view: HostPlaneView): void => { listener(view) }
+        ipcRenderer.on(DESKTOP_IPC.hostPlaneChanged, handle)
+        return () => { ipcRenderer.off(DESKTOP_IPC.hostPlaneChanged, handle) }
+      },
+      subscribeDisconnect(listener) {
+        const handle = (): void => { listener() }
+        ipcRenderer.on(DESKTOP_IPC.cloudDisconnected, handle)
+        return () => { ipcRenderer.off(DESKTOP_IPC.cloudDisconnected, handle) }
       },
     },
     keyboard: {

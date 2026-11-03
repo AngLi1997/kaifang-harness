@@ -42,9 +42,24 @@ export const DESKTOP_IPC = {
   kaifangSignOut: 'dsh-desktop:kaifang-sign-out',
   kaifangRefresh: 'dsh-desktop:kaifang-refresh',
   kaifangChanged: 'dsh-desktop:kaifang-changed',
+  hostPlaneSet: 'dsh-desktop:host-plane-set',
+  hostPlaneChanged: 'dsh-desktop:host-plane-changed',
+  cloudDisconnected: 'dsh-desktop:cloud-disconnected',
 } as const
 
 /** Signed-in Platform identity shown by the workspace account launcher; carries no token. */
+import type { HostPlaneId } from './host-plane.ts'
+export type { HostPlaneId }
+
+/** Dual-plane boot/change payload for the product renderer. */
+export interface HostPlaneView {
+  readonly cloudOnline: boolean
+  readonly activePlane: HostPlaneId
+  readonly streamBaseUrl: string
+  readonly ownsHost: boolean
+  readonly sidecarApiPrefix?: string
+}
+
 export interface KaifangAccountView {
   readonly username: string
   readonly displayName: string
@@ -109,6 +124,15 @@ export interface DshDesktopProductApi {
     signOut(): Promise<void>
     refresh(): Promise<void>
     subscribe(listener: (account: KaifangAccountView | null) => void): () => void
+  }
+  /** Dual-plane (本机 / 云端): switch active Host and observe disconnect. */
+  readonly hostPlane: {
+    current(): Promise<HostPlaneView>
+    setActive(plane: HostPlaneId): Promise<HostPlaneView>
+    /** Renderer observed the cloud sidecar as unreachable. */
+    reportCloudLost(): Promise<HostPlaneView>
+    subscribe(listener: (view: HostPlaneView) => void): () => void
+    subscribeDisconnect(listener: () => void): () => void
   }
   readonly updates: {
     status(): Promise<DesktopUpdatePresentation>

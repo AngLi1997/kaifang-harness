@@ -363,6 +363,16 @@ describe('WorkspaceController commands', () => {
 })
 
 describe('WorkspaceController follow', () => {
+  it('exposes an admitted unary listSnapshot for dual-plane sidecar polls', async () => {
+    const { controller, root } = await harness()
+    const created = await controller.create({ path: stageDir(root, 'sidecar-snap') })
+    const snapshot = controller.listSnapshot()
+    expect(snapshot.items.map(item => item.workspaceId)).toContain(created.workspace.workspaceId)
+    expect(snapshot.archivedSessionIds).toEqual([])
+    expect(snapshot.pinnedSessionIds).toEqual([])
+    expect(snapshot.deletedSessionIds).toEqual([])
+  })
+
   it('seeds a new feed from existing rows and rejects an inconsistent registry commit', async () => {
     const { ctx, root } = await harness()
     const existing = await ctx.workspaceRegistry.create(stageDir(root, 'existing'))

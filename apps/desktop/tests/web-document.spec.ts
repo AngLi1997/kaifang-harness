@@ -186,3 +186,45 @@ it('keeps Gateway follow streamBaseUrl on the same Host as /api forwarding', () 
     activeHostUrl: 'http://127.0.0.1:4123/',
   })).toBe(false)
 })
+
+
+it('forwards dual-plane sidecar RPCs to the inactive Host with the prefix stripped', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } }))
+  vi.stubGlobal('fetch', fetch)
+  const forward = resolveDesktopHostForward('/__dsh_sidecar__/api/workspace/listSnapshot', {
+    ownsHost: true,
+    activeHostUrl: 'http://127.0.0.1:3080/',
+    activeHostCookie: 'local=1',
+    localHostUrl: 'http://127.0.0.1:3080/',
+    localHostCookie: 'local=1',
+    sidecarHostUrl: 'http://127.0.0.1:4080/',
+    sidecarHostCookie: 'cloud=1',
+  })
+  expect(forward).toEqual({
+    hostUrl: 'http://127.0.0.1:4080/',
+    hostCookie: 'cloud=1',
+    pathname: '/api/workspace/listSnapshot',
+  })
+  const response = await forwardWebRequest(
+    new Request('dsh-app://app/__dsh_sidecar__/api/workspace/listSnapshot', {
+      method: 'POST',
+      headers: { origin: 'dsh-app://app', 'content-type': 'application/json' },
+      body: '{}',
+    }),
+    forward!.hostUrl,
+    forward!.hostCookie,
+    forward!.pathname,
+  )
+  expect(response.status).toBe(200)
+  const [target, init] = fetch.mock.calls[0] as [URL, RequestInit]
+  expect(target.href).toBe('http://127.0.0.1:4080/api/workspace/listSnapshot')
+  expect(new Headers(init.headers).get('cookie')).toBe('cloud=1')
+})
+
+it('refuses sidecar forwards when dual-plane cloud is offline', () => {
+  expect(resolveDesktopHostForward('/__dsh_sidecar__/api/workspace/listSnapshot', {
+    ownsHost: true,
+    activeHostUrl: 'http://127.0.0.1:3080/',
+    activeHostCookie: 'local=1',
+  })).toBeUndefined()
+})

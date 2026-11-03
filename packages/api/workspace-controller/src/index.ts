@@ -258,6 +258,15 @@ export class WorkspaceController extends TypertRemoteService {
   }
 
   /**
+   * Unary snapshot of the admitted Workspace projection (same filter as follow).
+   * Desktop dual-plane sidecar polls this for the inactive Host without a second mux.
+   */
+  @Remote('listSnapshot')
+  listSnapshot(): WorkspaceBaseline {
+    return this.admittedBaseline()
+  }
+
+  /**
    * Stream a complete Workspace baseline followed by ordered increments. A
    * non-owner receives only the Workspaces and Sessions `allows()` admits.
    * When a delivered Workspace is no longer admitted at its next change or
@@ -270,28 +279,23 @@ export class WorkspaceController extends TypertRemoteService {
    */
   @Remote({ mode: 'stream' })
   async *follow(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {
-    const access = this.ctx.remoteAccess
-    const visible = (workspaceId: WorkspaceId): boolean => access.allows({ kind: 'workspace', id: workspaceId })
+    const filtered = (value: WorkspaceBaseline): WorkspaceBaseline => this.admittedBaseline(value)
+    const visible = (workspaceId: WorkspaceId): boolean => this.ctx.remoteAccess.allows({ kind: 'workspace', id: workspaceId })
     const sessions = (sessionIds: readonly SessionId[]): SessionId[] =>
-      sessionIds.filter(sessionId => access.allows({ kind: 'session', id: sessionId }))
+      sessionIds.filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId }))
     /** Workspaces this generation has delivered and not yet removed. */
     const delivered = new Set<WorkspaceId>()
-    /** The admitted part of `value`; it becomes the delivered set. */
-    const filtered = (value: WorkspaceBaseline): WorkspaceBaseline => {
-      const items = value.items.filter(item => visible(item.workspaceId))
+    // Seed delivered from the opening baseline filter below.
+    const track = (value: WorkspaceBaseline): WorkspaceBaseline => {
+      const next = filtered(value)
       delivered.clear()
-      for (const item of items) delivered.add(item.workspaceId)
-      return {
-        items: items.map(item => ({ ...item, sessionIds: sessions(item.sessionIds) })),
-        archivedSessionIds: sessions(value.archivedSessionIds),
-        pinnedSessionIds: sessions(value.pinnedSessionIds),
-        deletedSessionIds: sessions(value.deletedSessionIds),
-      }
+      for (const item of next.items) delivered.add(item.workspaceId)
+      return next
     }
     for await (const frame of this.feed.follow(signal)) {
       switch (frame.type) {
         case 'baseline':
-          yield { type: 'baseline', value: filtered(frame.value) }
+          yield { type: 'baseline', value: track(frame.value) }
           break
         case 'upsert': {
           const workspaceId = frame.workspace.workspaceId
@@ -299,7 +303,7 @@ export class WorkspaceController extends TypertRemoteService {
             delivered.add(workspaceId)
             yield { type: 'upsert', workspace: { ...frame.workspace, sessionIds: sessions(frame.workspace.sessionIds) } }
           } else if (delivered.has(workspaceId)) {
-            yield { type: 'replace', value: filtered(this.feed.baseline()) }
+            yield { type: 'replace', value: track(this.feed.baseline()) }
           }
           break
         }
@@ -308,7 +312,7 @@ export class WorkspaceController extends TypertRemoteService {
           break
         case 'order':
           if (frame.workspaceIds.some(workspaceId => delivered.has(workspaceId) && !visible(workspaceId))) {
-            yield { type: 'replace', value: filtered(this.feed.baseline()) }
+            yield { type: 'replace', value: track(this.feed.baseline()) }
           } else {
             yield { type: 'order', workspaceIds: frame.workspaceIds.filter(visible) }
           }
@@ -326,6 +330,22 @@ export class WorkspaceController extends TypertRemoteService {
         default:
           assertNever(frame)
       }
+    }
+  }
+
+
+  /** Filter a baseline (or the live feed baseline) by Remote access admits. */
+  private admittedBaseline(value: WorkspaceBaseline = this.feed.baseline()): WorkspaceBaseline {
+    const access = this.ctx.remoteAccess
+    const visible = (workspaceId: WorkspaceId): boolean => access.allows({ kind: 'workspace', id: workspaceId })
+    const sessions = (sessionIds: readonly SessionId[]): SessionId[] =>
+      sessionIds.filter(sessionId => access.allows({ kind: 'session', id: sessionId }))
+    return {
+      items: value.items.filter(item => visible(item.workspaceId))
+        .map(item => ({ ...item, sessionIds: sessions(item.sessionIds) })),
+      archivedSessionIds: sessions(value.archivedSessionIds),
+      pinnedSessionIds: sessions(value.pinnedSessionIds),
+      deletedSessionIds: sessions(value.deletedSessionIds),
     }
   }
 

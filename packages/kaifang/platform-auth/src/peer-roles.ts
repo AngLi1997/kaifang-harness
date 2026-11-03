@@ -16,7 +16,7 @@ export const PLATFORM_USER_SESSION_ACTIONS = [
   'session/rename', 'session/fork', 'session/prompt', 'session/attachment', 'session/updateQueue',
   'session/cancel', 'session/page', 'session/follow', 'session/projections', 'session/list', 'session/search', 'session/control',
   'workspace/insertSessionBefore', 'workspace/archiveSession', 'workspace/unarchiveSession', 'workspace/deleteSession',
-  'workspace/pinSession', 'workspace/unpinSession', 'workspace/follow',
+  'workspace/pinSession', 'workspace/unpinSession', 'workspace/follow', 'workspace/listSnapshot',
   // Composer / mode-switch and preset selection operate on the admitted session.
   'commands/execute', 'commands/list', 'agentPresets/select',
   'fileUploads/upload', 'fileReferences/list', 'sessionReferenceResolver/candidates',
@@ -33,7 +33,7 @@ export const PLATFORM_USER_SESSION_ACTIONS = [
 export const PLATFORM_USER_WORKSPACE_ACTIONS = [
   'workspace/create', 'workspace/initializeDefault', 'workspace/rename', 'workspace/delete', 'session/create',
   'workspace/insertBefore', 'workspace/insertSessionBefore', 'workspace/archiveSession',
-  'workspace/unarchiveSession', 'workspace/deleteSession', 'workspace/pinSession', 'workspace/unpinSession', 'workspace/follow',
+  'workspace/unarchiveSession', 'workspace/deleteSession', 'workspace/pinSession', 'workspace/unpinSession', 'workspace/follow', 'workspace/listSnapshot',
 ] as const
 
 /**
@@ -42,7 +42,7 @@ export const PLATFORM_USER_WORKSPACE_ACTIONS = [
  * safe startup/read operations plus Settings chrome the Peer must serve.
  */
 export const PLATFORM_USER_GLOBAL_ACTIONS = [
-  'workspace/create', 'workspace/initializeDefault', 'workspace/follow',
+  'workspace/create', 'workspace/initializeDefault', 'workspace/follow', 'workspace/listSnapshot',
   'session/create', 'session/list', 'session/search', 'session/control', 'session/modelCatalog',
   'session/initializeDefaultModel', 'settings/describe', 'settings/mutate', 'settings/update', 'settings/replace',
   'credentials/describe',

@@ -1,5 +1,6 @@
 /** Local Web document and authenticated HTTP forwarding for the application window. */
 import { readFile } from 'node:fs/promises'
+import { isSidecarApiPath, stripSidecarApiPrefix } from './host-plane.ts'
 import { extname, resolve, sep } from 'node:path'
 
 const MIME: Readonly<Record<string, string>> = {
@@ -171,8 +172,19 @@ export function resolveDesktopHostForward(
     readonly activeHostCookie: string
     readonly localHostUrl?: string
     readonly localHostCookie?: string
+    /** When dual-plane is online, sidecar RPCs target the inactive Host. */
+    readonly sidecarHostUrl?: string
+    readonly sidecarHostCookie?: string
   },
-): { readonly hostUrl: string; readonly hostCookie: string } | undefined {
+): { readonly hostUrl: string; readonly hostCookie: string; readonly pathname?: string } | undefined {
+  if (isSidecarApiPath(pathname)) {
+    if (options.sidecarHostUrl === undefined || options.sidecarHostCookie === undefined) return undefined
+    return {
+      hostUrl: options.sidecarHostUrl,
+      hostCookie: options.sidecarHostCookie,
+      pathname: stripSidecarApiPrefix(pathname),
+    }
+  }
   if (!options.ownsHost && isDesktopOwnedHostPath(pathname)) {
     if (options.localHostUrl === undefined || options.localHostCookie === undefined) return undefined
     return { hostUrl: options.localHostUrl, hostCookie: options.localHostCookie }
@@ -191,12 +203,17 @@ export function resolveDesktopHostForward(
  * @param cookie - Host-issued authentication cookie.
  * @returns Host response without connection-level headers.
  */
-export async function forwardWebRequest(request: Request, host: string, cookie: string): Promise<Response> {
+export async function forwardWebRequest(
+  request: Request,
+  host: string,
+  cookie: string,
+  rewritePathname?: string,
+): Promise<Response> {
   const source = new URL(request.url)
   const origin = request.headers.get('origin')
   if (origin !== null && origin !== 'dsh-app://app') return new Response(null, { status: 403 })
   const target = new URL(host)
-  target.pathname = source.pathname
+  target.pathname = rewritePathname ?? source.pathname
   target.search = source.search
   const headers = new Headers(request.headers)
   for (const name of ['host', 'origin', 'cookie', 'sec-fetch-site']) headers.delete(name)

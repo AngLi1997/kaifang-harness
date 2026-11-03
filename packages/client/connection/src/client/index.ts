@@ -117,6 +117,12 @@ export interface ClientTransportHooks {
   createWebSocket?: ConnectionWebSocketFactory
   /** Host base URL for desktop or Node sockets; omission uses the document base. */
   streamBaseUrl?: string
+  /** Desktop dual-plane: shared Host Peer is admitted (sidebar shows 本机+云端). */
+  cloudOnline?: boolean
+  /** Desktop dual-plane: which Host answers the active shell RPCs and Gateway. */
+  activePlane?: 'local' | 'cloud'
+  /** Desktop dual-plane: document path prefix for the inactive Host's unary RPCs. */
+  sidecarApiPrefix?: string
 }
 
 /** Page global carrying {@link ClientTransportHooks}; absent in the served web app. */

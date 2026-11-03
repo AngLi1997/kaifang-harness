@@ -347,3 +347,10 @@
   height: 12px;
   color: var(--dsw-alias-menu-icon);
 }
+
+.planeSection {
+  padding: 8px 12px 4px;
+  color: var(--ds-color-text-secondary);
+  font-size: var(--ds-font-size-small);
+  font-weight: 600;
+}

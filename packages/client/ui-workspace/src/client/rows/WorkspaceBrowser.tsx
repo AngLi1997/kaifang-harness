@@ -14,7 +14,7 @@
  * are slot entries with their own behavior, so this component threads no
  * action callbacks and hosts no action surface.
  */
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import clsx from 'clsx'
 import {
   AnimatedRows, Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
@@ -40,6 +40,7 @@ import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
+import { CloudDisconnectToast, dualPlaneStore, PlaneHeader, SidecarPlaneList } from '../host-planes/index.ts'
 
 /**
  * Column slide length (--ds-transition-duration-slow): rail-search focus waits it out —
@@ -1007,6 +1008,11 @@ export function WorkspaceBrowser({
   // Live occupancy of this surface's directory-flow hole (the same source the
   // flow reads): a composition without a picking affordance can add nothing.
   const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
+  const dualPlane = useSyncExternalStore(
+    fn => dualPlaneStore.subscribe(fn),
+    () => dualPlaneStore.getSnapshot(),
+  )
+  const showPlanes = dualPlane.cloudOnline
   const groupBy = useStore(s => s.groupBy)
   const orderBy = useStore(s => s.orderBy)
   // Persisted view blobs written before the archived filter existed rehydrate
@@ -1364,6 +1370,7 @@ export function WorkspaceBrowser({
 
   return (
     <div className={clsx(css.root, !wide && css.rail)}>
+      <CloudDisconnectToast text={t('plane.cloudDisconnected')} />
       <div className={css.sectionHeader}>
         {wide && (
           <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>
@@ -1500,7 +1507,117 @@ export function WorkspaceBrowser({
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
       <div className={css.listArea}>
-        {wide && (normalizedQuery !== ''
+        {wide && showPlanes && (
+          <PlaneHeader
+            plane="local"
+            active={dualPlane.activePlane === 'local'}
+            label={t('plane.local')}
+            currentLabel={t('plane.current')}
+          />
+        )}
+        {wide && showPlanes && dualPlane.activePlane !== 'local' && (
+          <SidecarPlaneList plane="local" emptyLabel={t('empty.none')} onOpenSession={guardedOpen} />
+        )}
+        {wide && (!showPlanes || dualPlane.activePlane === 'local') && (normalizedQuery !== ''
+          ? (
+            <SearchResults
+              usePanelInfo={usePanelInfo}
+              useSessionAccess={useSessionAccess}
+              useSessions={useSessions}
+              useSessionStatus={useSessionStatus}
+              open={openSearchResult}
+              onUnarchive={onSessionUnarchive}
+              workspaces={workspaces}
+              archivedSessionIds={archivedSessionIds}
+              deletedSessionIds={deletedSessionIds}
+              archivedFilter={archivedFilter}
+              query={normalizedQuery}
+              remote={remoteSearch}
+              resultLimit={searchResultLimit}
+              t={t}
+            />
+          )
+          : groupBy === 'flat'
+            ? (
+              <FlatList
+                useSessionAccess={useSessionAccess}
+                usePanelInfo={usePanelInfo}
+                list={list}
+                sessionIds={orderedFlatSessionIds}
+                rowState={rowState}
+                onLeaveArchivedOnly={leaveArchivedOnly}
+                workspaceReady={workspaceReady}
+                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                useSessionStatus={useSessionStatus}
+                open={guardedOpen}
+                onSessionRenameRequest={requestSessionRename}
+                renderSlot={renderSlot}
+                setSessionOrder={saveSessionOrder}
+                revealSessionId={revealSessionId}
+                onSessionRevealed={acknowledgeSessionReveal}
+                home={home}
+                t={t}
+              />
+            )
+            : (
+              <SessionTree
+                useRemoteAccess={useRemoteAccess}
+                useSessionAccess={useSessionAccess}
+                useWorkspaceAccess={useWorkspaceAccess}
+                usePanelInfo={usePanelInfo}
+                list={list}
+                shortcuts={shortcuts}
+                useSessionStatus={useSessionStatus}
+                onSessionRenameRequest={requestSessionRename}
+                renderSlot={renderSlot}
+                workspaces={orderedWorkspaces}
+                ungroupedSessionIds={orderedUngroupedSessionIds}
+                workspaceReady={workspaceReady}
+                nestWorkspaces={groupBy === 'workspace-tree'}
+                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                groupExpansion={groupExpansion}
+                setGroupExpanded={actions.setGroupExpanded}
+                setSessionOrder={saveSessionOrder}
+                rowState={rowState}
+                onLeaveArchivedOnly={leaveArchivedOnly}
+                startSession={startSession}
+                open={guardedOpen}
+                insertWorkspaceBefore={insertWorkspaceBefore}
+                revealSessionId={revealSessionId}
+                onSessionRevealed={acknowledgeSessionReveal}
+                home={home}
+                t={t}
+                onRenameRequest={(workspaceId, displayTitle) => {
+                  setRenameTarget({
+                    workspaceId,
+                    storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,
+                  })
+                  setRenameDraft(displayTitle)
+                  setRenameError(null)
+                }}
+                onDeleteRequest={(workspaceId, title) => {
+                  setDeleteTarget({ workspaceId, title })
+                  setDeleteError(null)
+                }}
+                onClearRequest={(workspaceId, title) => {
+                  setClearTarget({ workspaceId, title })
+                  setClearError(null)
+                }}
+              />
+            ))}
+
+        {wide && showPlanes && (
+          <PlaneHeader
+            plane="cloud"
+            active={dualPlane.activePlane === 'cloud'}
+            label={t('plane.cloud')}
+            currentLabel={t('plane.current')}
+          />
+        )}
+        {wide && showPlanes && dualPlane.activePlane !== 'cloud' && (
+          <SidecarPlaneList plane="cloud" emptyLabel={t('plane.sidecarEmpty')} onOpenSession={guardedOpen} />
+        )}
+        {wide && showPlanes && dualPlane.activePlane === 'cloud' && (normalizedQuery !== ''
           ? (
             <SearchResults
               usePanelInfo={usePanelInfo}

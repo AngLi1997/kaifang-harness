@@ -39,6 +39,8 @@ describe('kaifang-user Peer allowlist', () => {
     expect(PLATFORM_USER_GLOBAL_ACTIONS).toContain('agentPresets/read')
     expect(PLATFORM_USER_SESSION_ACTIONS).toContain('agentPresets/select')
     expect(PLATFORM_USER_SESSION_ACTIONS).toContain('workspace/deleteSession')
+    expect(PLATFORM_USER_GLOBAL_ACTIONS).toContain('workspace/listSnapshot')
+    expect(PLATFORM_USER_SESSION_ACTIONS).toContain('workspace/listSnapshot')
     // DeepSeek account stream must stay off kaifang-user Peers.
     expect(PLATFORM_USER_GLOBAL_ACTIONS).not.toContain('account/watch')
   })
