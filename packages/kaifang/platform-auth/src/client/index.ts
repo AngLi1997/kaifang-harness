@@ -31,6 +31,9 @@ export function apply(ctx: ClientContext): void {
   let redirecting = false
   const checkLogin = async (): Promise<void> => {
     if (redirecting) return
+    // Desktop boots with ownsHost and uses local owner auth, not shared-host IAM.
+    const transport = (globalThis as { __DSH_TRANSPORT__?: { ownsHost?: boolean } }).__DSH_TRANSPORT__
+    if (transport?.ownsHost === true) return
     try {
       const response = await fetch('/kaifang/auth/status', { headers: { accept: 'application/json' } })
       if (!response.ok) return

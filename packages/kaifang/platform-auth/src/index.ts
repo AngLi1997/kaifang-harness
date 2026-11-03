@@ -672,6 +672,8 @@ class PlatformSession {
 }
 
 function checkTrusted(connection: Context['connection'], req: IncomingMessage, res: ServerResponse): boolean {
+  // Desktop profile does not require platform trust checks for its internal Host/API requests.
+  if (process.env.ELECTRON_RUN_AS_NODE === '1') return true
   if (connection.trustRejection === undefined) {
     writeText(res, 403, 'forbidden')
     return false
@@ -841,7 +843,10 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
         webCtx.webServer.register(route(`${AUTH_PATH}/status`, async (req, res) => {
           if (!checkTrusted(webCtx.connection, req, res)) return
           if (req.method !== 'GET') { writeText(res, 405, 'method not allowed'); return }
-          if (!enabled) { writeJson(res, 200, { configured: false, account: null }); return }
+          // Desktop owns the Host with browser/owner auth; do not advertise platform IAM login.
+          if (!enabled || process.env.ELECTRON_RUN_AS_NODE === '1') {
+            writeJson(res, 200, { configured: false, account: null }); return
+          }
           const user = await auth.status(sessionIdFromHeaders(req.headers as ConnectionTrustRequest['headers']))
           writeJson(res, 200, { configured: true, account: user === null ? null : {
             username: user.username, displayName: user.displayName, email: user.email, avatarUrl: null,
@@ -849,6 +854,11 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
         })),
         webCtx.webServer.register(route(`${AUTH_PATH}/entry`, (req, res) => {
           if (!enabled) { writeText(res, 503, 'KaifangMeta IAM is not configured for this Web Host'); return }
+          // Desktop never starts platform OAuth from the local Web surface.
+          if (process.env.ELECTRON_RUN_AS_NODE === '1') {
+            writeText(res, 503, 'Platform IAM sign-in is not used by Desktop Host')
+            return
+          }
           const endpoints = signInEndpoints(resolved, req, webCtx.webServer.port)
           if (!checkCallbackAuthority(req, res, endpoints, true)) return
           if (req.method !== 'GET') { writeText(res, 405, 'method not allowed'); return }
