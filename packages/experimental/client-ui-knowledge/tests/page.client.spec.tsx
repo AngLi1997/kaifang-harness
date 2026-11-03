@@ -50,7 +50,7 @@ function setup(state: KnowledgeCatalogState, overrides: Partial<KnowledgePageInj
     ...overrides,
   }
   const sessions: SessionListState = { ids: [], byId: {}, phase: 'ready', projectionsBySession: {} }
-  const workspaces: WorkspaceSnapshot = { items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null }
+  const workspaces: WorkspaceSnapshot = { items: [], archivedSessionIds: [], pinnedSessionIds: [], deletedSessionIds: [], state: 'idle', phase: 'ready', error: null }
   const props: KnowledgePageProps = {
     ...actions,
     useKnowledgeCatalog: bindSnapshotSelector(store),

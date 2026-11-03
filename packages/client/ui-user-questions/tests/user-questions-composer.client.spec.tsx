@@ -66,6 +66,7 @@ const workspaceState = {
   items: [],
   archivedSessionIds: [],
   pinnedSessionIds: [],
+  deletedSessionIds: [],
   state: 'idle' as const,
   phase: 'ready' as const,
   error: null,

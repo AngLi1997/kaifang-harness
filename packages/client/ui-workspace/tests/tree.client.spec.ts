@@ -92,10 +92,12 @@ const archived = (...ids: string[]): readonly SessionId[] => ids.map(sid)
 const rowState = (options: {
   pinned?: readonly string[]
   archived?: readonly string[]
+  deleted?: readonly string[]
   archivedFilter?: ArchivedFilter
 } = {}) => ({
   pinnedSessionIds: (options.pinned ?? []).map(sid),
   archivedSessionIds: (options.archived ?? []).map(sid),
+  deletedSessionIds: (options.deleted ?? []).map(sid),
   archivedFilter: options.archivedFilter ?? 'default' as const,
 })
 const noRows = rowState()

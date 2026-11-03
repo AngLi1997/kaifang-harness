@@ -96,6 +96,7 @@ function workspaceState(
     items,
     archivedSessionIds,
     pinnedSessionIds: [],
+    deletedSessionIds: [],
     phase,
     state: phase === 'ready' ? 'idle' : 'loading',
     error: null,
@@ -220,6 +221,15 @@ class FakeWorkspaces implements IWorkspaces {
   unarchiveSession(sessionId: SessionId): Promise<void> {
     this.unarchiveCalls.push(sessionId)
     return this.onUnarchive(sessionId)
+  }
+
+  deleteSession(sessionId: SessionId): Promise<void> {
+    this.list.update(state => ({
+      ...state,
+      deletedSessionIds: [...state.deletedSessionIds, sessionId],
+      archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+    }))
+    return Promise.resolve()
   }
 
   pinSession(sessionId: SessionId): Promise<void> {
