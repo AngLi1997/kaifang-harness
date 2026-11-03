@@ -12,6 +12,7 @@ import { DesktopHostFatalError, DesktopHostUncleanExitError } from '../src/host-
 import { en, zh } from '../src/locale.ts'
 import { DesktopUpdatePreparationError } from '../src/update-error.ts'
 import { writeCrashReport } from '../src/crash-report.ts'
+import { writePlatformSession } from '../src/platform-session.ts'
 
 type InvokeEvent = { sender?: unknown; senderFrame: { url: string } }
 type InvokeHandler = (event: InvokeEvent, ...args: unknown[]) => unknown
@@ -1227,6 +1228,42 @@ describe('desktop main startup', () => {
     await Promise.resolve(invoke(DESKTOP_IPC.showSignIn, 'app'))
     expect(harness.windows.at(-1)!.urls.at(-1)).toContain('renderer/welcome.html')
     expect(harness.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('opens Platform sign-in when an expired session cannot refresh', async () => {
+    const userData = harness.app.getPath('userData')
+    const platformOrigin = 'http://127.0.0.1:3001'
+    mkdirSync(join(userData, 'desktop'), { recursive: true })
+    writeFileSync(join(userData, 'desktop', 'shared-harness.json'), JSON.stringify({
+      url: platformOrigin,
+      hostUrl: 'http://127.0.0.1:3080',
+    }))
+    await writePlatformSession(userData, {
+      platformOrigin,
+      issuer: platformOrigin,
+      clientId: 'desktop-test',
+      accessToken: 'expired-access-token',
+      refreshToken: 'rejected-refresh-token',
+      expiresAt: Date.now() - 60_000,
+      scopes: [],
+      user: { sub: 'test-sub', tid: 'test-tenant', username: 'test-user', displayName: 'Test user', email: null },
+    })
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (_input, init) => init?.method === 'GET'
+      ? Response.json({ configured: true })
+      : Response.json({ error: 'denied' }, { status: 401 })))
+
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    harness.prepared.resolve()
+    await harness.hostStarted.promise
+    harness.hosts[0]!.ready.resolve()
+    await vi.waitFor(() => {
+      expect(harness.windows.some(window => window.urls.some(url => url.includes('welcome.html')))).toBe(true)
+    })
+
+    expect(harness.dialog.showMessageBox).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: en.sharedHostOfflineTitle }),
+    )
   })
 
   it.each([

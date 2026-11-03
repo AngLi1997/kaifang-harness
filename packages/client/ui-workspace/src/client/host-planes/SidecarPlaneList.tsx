@@ -28,36 +28,72 @@ export function PlaneHeader({
 export function SidecarPlaneList({
   plane,
   emptyLabel,
+  ungroupedLabel,
   onOpenSession,
 }: {
   plane: HostPlaneId
   emptyLabel: string
+  ungroupedLabel: string
   onOpenSession: (sessionId: SessionId) => void
 }): ReactNode {
-  const sessions = useSyncExternalStore(
+  const snapshot = useSyncExternalStore(
     fn => dualPlaneStore.subscribe(fn),
-    () => dualPlaneStore.getSnapshot().sidecarSessions,
+    () => dualPlaneStore.getSnapshot(),
   )
-  if (sessions.length === 0) {
+  const sessionsByWorkspace = new Map<string, (typeof snapshot.sidecarSessions)[number][]>()
+  const ungrouped: (typeof snapshot.sidecarSessions)[number][] = []
+  for (const session of snapshot.sidecarSessions) {
+    if (session.workspaceId === undefined) {
+      ungrouped.push(session)
+      continue
+    }
+    const rows = sessionsByWorkspace.get(session.workspaceId) ?? []
+    rows.push(session)
+    sessionsByWorkspace.set(session.workspaceId, rows)
+  }
+  if (snapshot.sidecarWorkspaces.length === 0 && snapshot.sidecarSessions.length === 0) {
     return <div className={css.sidecarEmpty}>{emptyLabel}</div>
   }
   return (
     <div className={css.sidecarList} data-host-plane={plane}>
-      {sessions.map(row => (
-        <button
-          key={row.sessionId}
-          type="button"
-          className={css.sidecarRow}
-          onClick={() => {
-            void setActivePlane(plane).then(() => {
-              onOpenSession(row.sessionId as SessionId)
-            })
-          }}
-        >
-          <span className={css.sidecarTitle}>{row.title}</span>
-          <span className={css.sidecarMeta}>{row.workspaceTitle}</span>
-        </button>
+      {snapshot.sidecarWorkspaces.map(workspace => (
+        <section className={css.sidecarWorkspace} key={workspace.workspaceId}>
+          <div className={css.sidecarWorkspaceTitle}>{workspace.title}</div>
+          {(sessionsByWorkspace.get(workspace.workspaceId) ?? []).map(row => (
+            <button
+              key={row.sessionId}
+              type="button"
+              className={css.sidecarRow}
+              onClick={() => {
+                void setActivePlane(plane).then(() => {
+                  onOpenSession(row.sessionId as SessionId)
+                })
+              }}
+            >
+              <span className={css.sidecarTitle}>{row.title}</span>
+            </button>
+          ))}
+        </section>
       ))}
+      {ungrouped.length > 0 && (
+        <section className={css.sidecarWorkspace}>
+          <div className={css.sidecarWorkspaceTitle}>{ungroupedLabel}</div>
+          {ungrouped.map(row => (
+            <button
+              key={row.sessionId}
+              type="button"
+              className={css.sidecarRow}
+              onClick={() => {
+                void setActivePlane(plane).then(() => {
+                  onOpenSession(row.sessionId as SessionId)
+                })
+              }}
+            >
+              <span className={css.sidecarTitle}>{row.title}</span>
+            </button>
+          ))}
+        </section>
+      )}
     </div>
   )
 }

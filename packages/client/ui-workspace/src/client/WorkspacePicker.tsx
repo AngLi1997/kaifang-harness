@@ -119,13 +119,7 @@ export function WorkspacePickFlow({
     () => dualPlaneStore.getSnapshot(),
   )
   const showPlanes = !addOnly && dualPlane.cloudOnline
-  const sidecarWorkspaces = useMemo(() => {
-    const byId = new Map<string, string>()
-    for (const row of dualPlane.sidecarSessions) {
-      if (!byId.has(row.workspaceId)) byId.set(row.workspaceId, row.workspaceTitle)
-    }
-    return [...byId.entries()].map(([id, title]) => ({ id, title }))
-  }, [dualPlane.sidecarSessions])
+  const sidecarWorkspaces = dualPlane.sidecarWorkspaces
   // When initializeDefault already lists the default Workspace, its row is the
   // one "Default workspace" entry — do not also offer the unassigned sentinel.
   const unassignedEntries: MenuEntry[] = allowUnassigned && defaultWorkspace === undefined
@@ -161,17 +155,15 @@ export function WorkspacePickFlow({
   })
   const activePlaneItems: MenuEntry[] = listed.map(({ id, title, path, suffix }) =>
     toWorkspaceItem(id, title, path, suffix))
-  const localSidecarItems: MenuEntry[] = sidecarWorkspaces.map(({ id, title }) =>
-    toWorkspaceItem(`::plane:local:${id}`, title))
-  const cloudSidecarItems: MenuEntry[] = sidecarWorkspaces.map(({ id, title }) =>
-    toWorkspaceItem(`::plane:cloud:${id}`, title))
+  const sidecarItems = (plane: 'local' | 'cloud'): MenuEntry[] => sidecarWorkspaces.map(({ workspaceId, title }) =>
+    toWorkspaceItem(`::plane:${plane}:${workspaceId}`, title))
   const items: MenuEntry[] = pinFooter
     ? showPlanes
       ? [
         { type: 'label', id: 'plane-local', text: t('plane.local') },
-        ...dualPlane.activePlane === 'local' ? activePlaneItems : localSidecarItems,
+        ...dualPlane.activePlane === 'local' ? activePlaneItems : sidecarItems('local'),
         { type: 'label', id: 'plane-cloud', text: t('plane.cloud') },
-        ...dualPlane.activePlane === 'cloud' ? activePlaneItems : cloudSidecarItems,
+        ...dualPlane.activePlane === 'cloud' ? activePlaneItems : sidecarItems('cloud'),
       ]
       : activePlaneItems
     : addOnly ? addEntries : [

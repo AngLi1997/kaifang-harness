@@ -8,7 +8,7 @@ interface TransportGlobal {
     streamBaseUrl?: string
     cloudOnline?: boolean
     activePlane?: HostPlaneId
-    sidecarApiPrefix?: string
+    sidecarApiPrefix?: string | undefined
   }
   dshDesktop?: {
     hostPlane?: {

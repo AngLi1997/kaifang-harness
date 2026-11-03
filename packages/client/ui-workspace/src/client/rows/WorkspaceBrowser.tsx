@@ -1516,7 +1516,7 @@ export function WorkspaceBrowser({
           />
         )}
         {wide && showPlanes && dualPlane.activePlane !== 'local' && (
-          <SidecarPlaneList plane="local" emptyLabel={t('empty.none')} onOpenSession={guardedOpen} />
+          <SidecarPlaneList plane="local" emptyLabel={t('empty.none')} ungroupedLabel={t('group.ungrouped')} onOpenSession={guardedOpen} />
         )}
         {wide && (!showPlanes || dualPlane.activePlane === 'local') && (normalizedQuery !== ''
           ? (
@@ -1615,7 +1615,7 @@ export function WorkspaceBrowser({
           />
         )}
         {wide && showPlanes && dualPlane.activePlane !== 'cloud' && (
-          <SidecarPlaneList plane="cloud" emptyLabel={t('plane.sidecarEmpty')} onOpenSession={guardedOpen} />
+          <SidecarPlaneList plane="cloud" emptyLabel={t('plane.sidecarEmpty')} ungroupedLabel={t('group.ungrouped')} onOpenSession={guardedOpen} />
         )}
         {wide && showPlanes && dualPlane.activePlane === 'cloud' && (normalizedQuery !== ''
           ? (

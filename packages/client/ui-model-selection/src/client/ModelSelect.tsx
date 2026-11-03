@@ -44,29 +44,37 @@ import type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
 
-function useDualPlaneMenu(): {
+interface DualPlaneMenuSnapshot {
   cloudOnline: boolean
   activePlane: 'local' | 'cloud'
-  sidecarGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
-} {
-  return useSyncExternalStore(
-    (fn) => {
-      const store = (globalThis as { __DSH_DUAL_PLANE__?: { subscribe(fn: () => void): () => void } }).__DSH_DUAL_PLANE__
-      return store?.subscribe(fn) ?? (() => {})
-    },
-    () => {
-      const snap = (globalThis as { __DSH_DUAL_PLANE__?: { getSnapshot(): {
-        cloudOnline: boolean
-        activePlane: 'local' | 'cloud'
-        sidecarModelGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
-      } } }).__DSH_DUAL_PLANE__?.getSnapshot()
-      return {
-        cloudOnline: snap?.cloudOnline === true,
-        activePlane: snap?.activePlane === 'cloud' ? 'cloud' as const : 'local' as const,
-        sidecarGroups: snap?.sidecarModelGroups ?? [],
-      }
-    },
-  )
+  sidecarModelGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
+}
+
+interface DualPlaneMenuStore {
+  subscribe(fn: () => void): () => void
+  getSnapshot(): DualPlaneMenuSnapshot
+}
+
+const OFFLINE_DUAL_PLANE_MENU: DualPlaneMenuSnapshot = {
+  cloudOnline: false,
+  activePlane: 'local',
+  sidecarModelGroups: [],
+}
+
+function dualPlaneMenuStore(): DualPlaneMenuStore | undefined {
+  return (globalThis as { __DSH_DUAL_PLANE__?: DualPlaneMenuStore }).__DSH_DUAL_PLANE__
+}
+
+function subscribeDualPlaneMenu(fn: () => void): () => void {
+  return dualPlaneMenuStore()?.subscribe(fn) ?? (() => {})
+}
+
+function getDualPlaneMenuSnapshot(): DualPlaneMenuSnapshot {
+  return dualPlaneMenuStore()?.getSnapshot() ?? OFFLINE_DUAL_PLANE_MENU
+}
+
+function useDualPlaneMenu(): DualPlaneMenuSnapshot {
+  return useSyncExternalStore(subscribeDualPlaneMenu, getDualPlaneMenuSnapshot)
 }
 
 /** Which pane the dropdown shows: the two-row root or one drilled-in list. */
@@ -658,9 +666,9 @@ export function ModelSelect(
                   <div className={css.planeSection} data-host-plane={dualPlane.activePlane === 'local' ? 'cloud' : 'local'}>
                     {dualPlane.activePlane === 'local' ? '云端' : '本机'}
                   </div>
-                  {dualPlane.sidecarGroups.length === 0
+                  {dualPlane.sidecarModelGroups.length === 0
                     ? <button type="button" className={css.item} disabled>{dualPlane.activePlane === 'local' ? '云端不可用' : '本机不可用'}</button>
-                    : dualPlane.sidecarGroups.flatMap(group => group.models.map(model => (
+                    : dualPlane.sidecarModelGroups.flatMap(group => group.models.map(model => (
                       <button
                         key={`sidecar-${group.id}-${model.id}`}
                         type="button"

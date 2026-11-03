@@ -15,5 +15,5 @@ export function CloudDisconnectToast({ text }: { text: string }): ReactNode {
     }
   }), [])
   if (seq === 0) return null
-  return <Toast key={seq} text={text} icon={<IconWarningOutlineRegular />} />
+  return <Toast key={seq} text={text} icon={<IconWarningOutlineRegular />} onDone={() => { setSeq(0) }} />
 }

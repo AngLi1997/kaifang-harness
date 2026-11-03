@@ -19,6 +19,7 @@ import type {
   WorkspaceUnarchiveSessionRequest,
   WorkspaceUnpinSessionRequest,
   WorkspaceValue,
+  WorkspaceBaseline,
   WorkspaceId,
   WorkspaceView,
 } from '../src/types.ts'
@@ -70,6 +71,12 @@ function deferred<T>(): Deferred<T> {
 
 class FakeWorkspaceRemote implements WorkspaceRemote {
   readonly initializeDefault = vi.fn<WorkspaceRemote['initializeDefault']>(async () => remoteOk({ workspace: workspace('default') }))
+  readonly listSnapshot = vi.fn<WorkspaceRemote['listSnapshot']>(async () => remoteOk<WorkspaceBaseline>({
+    items: [],
+    archivedSessionIds: [],
+    pinnedSessionIds: [],
+    deletedSessionIds: [],
+  }))
   readonly calls: Array<{ readonly method: string; readonly request: unknown }> = []
   onCreate: (request: WorkspaceCreateRequest) => Promise<RemoteResult<WorkspaceCreateValue>> = request =>
     Promise.resolve(remoteOk({ workspace: workspace(request.path.split('/').pop() ?? 'workspace'), created: true }))

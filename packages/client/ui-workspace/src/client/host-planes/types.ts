@@ -13,8 +13,12 @@ export interface HostPlaneTransport {
 export interface SidecarSessionRow {
   readonly sessionId: string
   readonly title: string
+  readonly workspaceId?: string
+}
+
+export interface SidecarWorkspaceRow {
   readonly workspaceId: string
-  readonly workspaceTitle: string
+  readonly title: string
 }
 
 export interface SidecarModelGroup {
@@ -29,6 +33,7 @@ export interface DualPlaneSnapshot {
   readonly cloudShellEmpty: boolean
   readonly activePlane: HostPlaneId
   readonly sidecarApiPrefix: string | undefined
+  readonly sidecarWorkspaces: readonly SidecarWorkspaceRow[]
   readonly sidecarSessions: readonly SidecarSessionRow[]
   readonly sidecarModelGroups: readonly SidecarModelGroup[]
   readonly disconnectToastSeq: number

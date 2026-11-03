@@ -6,6 +6,7 @@
   },
   "include": [
     "src/client",
+    "src/host-plane.ts",
     "src/welcome-api.ts",
     "src/locale.ts"
   ],

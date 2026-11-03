@@ -1,6 +1,7 @@
 /** Unary RPC against the inactive Host via the Desktop sidecar path prefix. */
 
-import type { SidecarModelGroup, SidecarSessionRow } from './types.ts'
+import type { SidecarModelGroup, SidecarSessionRow, SidecarWorkspaceRow } from './types.ts'
+import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 
 interface WorkspaceBaselineWire {
   readonly items?: readonly {
@@ -14,8 +15,9 @@ interface WorkspaceBaselineWire {
 interface SessionListWire {
   readonly items?: readonly {
     readonly sessionId?: string
-    readonly displayTitle?: string
-    readonly title?: string
+    readonly cwd?: string
+    readonly origin?: string
+    readonly projections?: { readonly values?: { readonly title?: unknown } }
   }[]
 }
 
@@ -42,7 +44,7 @@ async function sidecarCall(
 ): Promise<unknown> {
   const base = prefix.replace(/\/$/, '')
   const rpcId = globalThis.crypto?.randomUUID?.() ?? `sidecar-${Date.now()}`
-  const message: ClientRequest = { type: 'client-request', rpcId, method, payload }
+  const message: ClientRequest = { type: 'client-request', rpcId, method, payload: { args: payload } }
   const response = await globalThis.fetch(`${base}/api/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -66,33 +68,53 @@ async function sidecarCall(
 export async function fetchSidecarPlane(
   prefix: string,
   signal?: AbortSignal,
-): Promise<{ sessions: SidecarSessionRow[]; modelGroups: SidecarModelGroup[] }> {
+): Promise<{ workspaces: SidecarWorkspaceRow[]; sessions: SidecarSessionRow[]; modelGroups: SidecarModelGroup[] }> {
   const baseline = await sidecarCall(prefix, 'workspace/listSnapshot', {}, signal) as WorkspaceBaselineWire
   const deleted = new Set(baseline.deletedSessionIds ?? [])
+  const workspaces: SidecarWorkspaceRow[] = []
+  const sessionWorkspaces = new Map<string, SidecarWorkspaceRow>()
+  for (const workspace of baseline.items ?? []) {
+    if (typeof workspace.workspaceId !== 'string') continue
+    const row = { workspaceId: workspace.workspaceId, title: workspace.title ?? workspace.workspaceId }
+    workspaces.push(row)
+    for (const sessionId of workspace.sessionIds ?? []) {
+      if (!deleted.has(sessionId)) sessionWorkspaces.set(sessionId, row)
+    }
+  }
   let sessionTitles = new Map<string, string>()
+  let listedSessions: readonly NonNullable<SessionListWire['items']>[number][] = []
   try {
-    const listed = await sidecarCall(prefix, 'session/list', {}, signal) as SessionListWire
+    const listed = await sidecarCall(prefix, 'session/list', { _request: {} }, signal) as SessionListWire
+    listedSessions = listed.items ?? []
     sessionTitles = new Map()
-    for (const item of listed.items ?? []) {
+    for (const item of listedSessions) {
       if (typeof item.sessionId !== 'string') continue
-      sessionTitles.set(item.sessionId, item.displayTitle ?? item.title ?? item.sessionId)
+      const title = item.projections?.values?.title
+      const cwdTitle = typeof item.cwd === 'string' ? workspaceTitleOf(item.cwd) : ''
+      sessionTitles.set(item.sessionId, typeof title === 'string' && title !== ''
+        ? title
+        : cwdTitle !== ''
+          ? cwdTitle
+          : item.sessionId)
     }
   } catch {
     sessionTitles = new Map()
   }
   const sessions: SidecarSessionRow[] = []
-  for (const workspace of baseline.items ?? []) {
-    if (typeof workspace.workspaceId !== 'string') continue
-    const workspaceTitle = workspace.title ?? workspace.workspaceId
-    for (const sessionId of workspace.sessionIds ?? []) {
-      if (deleted.has(sessionId)) continue
-      sessions.push({
-        sessionId,
-        title: sessionTitles.get(sessionId) ?? sessionId,
-        workspaceId: workspace.workspaceId,
-        workspaceTitle,
-      })
-    }
+  const added = new Set<string>()
+  for (const [sessionId, workspace] of sessionWorkspaces) {
+    added.add(sessionId)
+    sessions.push({
+      sessionId,
+      title: sessionTitles.get(sessionId) ?? sessionId,
+      workspaceId: workspace.workspaceId,
+    })
+  }
+  for (const item of listedSessions) {
+    if (typeof item.sessionId !== 'string' || item.origin === 'subagent'
+      || deleted.has(item.sessionId) || added.has(item.sessionId)) continue
+    added.add(item.sessionId)
+    sessions.push({ sessionId: item.sessionId, title: sessionTitles.get(item.sessionId) ?? item.sessionId })
   }
   let modelGroups: SidecarModelGroup[] = []
   try {
@@ -108,5 +130,5 @@ export async function fetchSidecarPlane(
   } catch {
     modelGroups = []
   }
-  return { sessions, modelGroups }
+  return { workspaces, sessions, modelGroups }
 }

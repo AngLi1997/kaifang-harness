@@ -234,6 +234,12 @@ function watchBrowserNetwork(controller: ConnectionController): () => void {
 export function installConnection(ctx: Context, options: ConnectionInstallOptions = {}): void {
   const pageLocation = options.location
   const transport = options.transport
+  // Desktop replaces the page transport when the active Host plane changes.
+  const pageTransport = (): ClientTransportHooks | undefined => (globalThis as ClientTransportGlobal).__DSH_TRANSPORT__
+  const followsPageTransport = transport !== undefined && transport === pageTransport()
+  const currentTransport = (): ClientTransportHooks | undefined => followsPageTransport
+    ? pageTransport() ?? transport
+    : transport ?? pageTransport()
   const recovery = options.recovery ?? {}
   const interactions = options.interactions ?? (pageLocation === undefined ? 'none' : 'answer')
   const rpc = transport?.rpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
@@ -276,8 +282,14 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   }
   const handle: ConnectionHandle = {
     interactions,
-    openWebSocket: path => openConnectionWebSocket(path, transport?.createWebSocket, transport?.streamBaseUrl),
-    isLoopback: transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    openWebSocket: (path) => {
+      const current = currentTransport()
+      return openConnectionWebSocket(path, current?.createWebSocket, current?.streamBaseUrl)
+    },
+    get isLoopback() {
+      const current = currentTransport()
+      return current?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname)
+    },
     generation: {
       getSnapshot: () => generation,
       subscribe: (listener) => {

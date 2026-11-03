@@ -7,10 +7,10 @@ afterEach(() => {
 })
 
 it('reads offline transport as local-only dual-plane state', () => {
-  ;(globalThis as { __DSH_TRANSPORT__: { ownsHost: boolean; streamBaseUrl: string } }).__DSH_TRANSPORT__ = {
+  vi.stubGlobal('__DSH_TRANSPORT__', {
     ownsHost: true,
     streamBaseUrl: 'http://127.0.0.1:3080',
-  }
+  })
   expect(readHostPlaneTransport()).toEqual({
     cloudOnline: false,
     activePlane: 'local',

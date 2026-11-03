@@ -457,7 +457,7 @@ async function main(): Promise<void> {
   let hostCookie: string | undefined
   let localHostUrl: string | undefined
   let localHostCookie: string | undefined
-  /** False while a shared Host Peer is available (dual-plane or exclusive Remote Client). */
+  /** Whether the active API route uses the embedded local Host. */
   let ownsHostTransport = true
   /** Dual-plane: Platform session admitted to shared Host; sidebar shows 本机+云端. */
   let cloudOnline = false
@@ -1462,7 +1462,7 @@ async function main(): Promise<void> {
     // document boots so sessions/models sync without a logout→login cycle.
     // Retry even when an earlier Host-down attempt left us on the local Host.
     let switchedToSharedHost = false
-    if (ownsHostTransport) {
+    if (ownsHostTransport && !cloudOnline) {
       const attached = await activateSharedHostIfPossible()
       switchedToSharedHost = attached.ok
       if (!attached.ok) {
@@ -1470,7 +1470,7 @@ async function main(): Promise<void> {
         const session = platformOrigin === ''
           ? undefined
           : await readPlatformSession(app.getPath('userData'), platformOrigin, Date.now())
-        if (session !== undefined && session.expiresAt <= Date.now() && session.refreshToken === '') {
+        if (session !== undefined && session.expiresAt <= Date.now()) {
           console.warn('desktop shared Host: stored platform session is expired; prompting sign-in')
           await showPlatformSignIn()
           return
