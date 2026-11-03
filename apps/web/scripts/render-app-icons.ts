@@ -1,29 +1,22 @@
 /**
- * Render the install icons of the Web application from the official
- * application tile.
+ * Render the install icons of the Web application from the desktop icon.
  *
  * A browser installs a Web App only with a raster 192px and a 512px icon, masks
  * the icon it puts on the home screen, and has no manifest support for iOS,
- * which reads `apple-touch-icon` instead. The whale favicon is the bare mark
- * drawn edge to edge: handed to a launcher directly it loses its fins to the
- * mask, and it carries neither the tile nor a background of its own. This
- * script rasterizes the official application tile (`apps/desktop/resources/icon.svg`,
- * the artwork the desktop application ships) into the committed PNGs under
- * `public/`. Every variant crops the tile's drop shadow, which belongs to a
- * desktop window rather than a launcher; the maskable variant additionally
- * scales the whale inside the safe zone a platform mask may crop, leaving the
- * tile's own gradient to fill the icon so no mask meets a seam.
+ * which reads `apple-touch-icon` instead. This script rasterizes the product
+ * mark embedded in `apps/desktop/resources/icon.svg` into the committed PNGs
+ * under `public/`. The mark stays transparent. The maskable variant adds inset
+ * so a launcher mask keeps it inside the safe zone.
  *
  * The committed PNGs are the output; rerun
  * `pnpm --filter @deepseek-ai/dsh-web-frontend run render:app-icons` after the
- * tile artwork changes.
+ * mark changes.
  * @module render-app-icons
  */
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertNever } from '@deepseek-ai/dsh-util-values'
 
 /** Vector source owned by the desktop application; 1104 units square with the tile inset. */
 export const TILE_SOURCE = fileURLToPath(new URL('../../desktop/resources/icon.svg', import.meta.url))
@@ -39,12 +32,6 @@ const TILE_INSET = { x: 40, y: 32 } as const
 
 /** Tile centre in source units, the fixed point of the maskable scale. */
 const TILE_CENTER = { x: TILE_INSET.x + TILE_EDGE / 2, y: TILE_INSET.y + TILE_EDGE / 2 } as const
-
-/** Density at which the source's own 1:1 scale renders. */
-const SOURCE_DENSITY = 72
-
-/** Samples per output pixel along each axis before reduction. */
-const RENDER_SCALE = 4
 
 /**
  * Fraction of a maskable icon the artwork keeps: the platform may crop the
@@ -135,46 +122,50 @@ export function maskableDocument(source: string): string {
   )
 }
 
+const EMBEDDED_PNG = /data:image\/png;base64,([A-Za-z0-9+/=]+)/u
+
+/** Extra inset for the maskable icon, inside the padding already in the master. */
+const MASKABLE_INNER_RATIO = 0.75
+
 /**
- * Rasterize one rewritten document at a square edge.
- * @param document - output of {@link tileDocument} or {@link maskableDocument}.
- * @param size - square edge in pixels.
+ * Read the product mark embedded in the desktop icon document.
+ * @param source - complete `icon.svg` document.
  * @returns the PNG bytes.
  */
-async function renderPng(document: string, size: number): Promise<Buffer> {
-  const { default: sharp } = await import('sharp')
-  const renderSize = Math.max(TILE_EDGE, size * RENDER_SCALE)
-  // A separate raster preserves the source's filters at full resolution and
-  // prevents SVG resize optimizations from bypassing the downsampling step.
-  const raster = await sharp(Buffer.from(document), { density: SOURCE_DENSITY * renderSize / TILE_EDGE })
-    .png()
-    .toBuffer()
-  return sharp(raster)
-    .resize(size, size, { kernel: 'lanczos3' })
-    .png()
-    .toBuffer()
-}
-
-function documentForVariant(source: string, kind: AppIconVariant['kind']): string {
-  switch (kind) {
-    case 'tile': return tileDocument(source)
-    case 'maskable': return maskableDocument(source)
-    default: return assertNever(kind)
-  }
+function embeddedMark(source: string): Buffer {
+  const encoded = EMBEDDED_PNG.exec(source)?.[1]
+  if (encoded === undefined) throw new Error('app icons: the tile source has no embedded PNG')
+  return Buffer.from(encoded, 'base64')
 }
 
 /**
- * Render every install icon from the tile source.
+ * Rasterize the embedded mark at a square edge. Maskable icons add inset so a
+ * launcher mask keeps the mark inside the safe zone.
+ * @param mark - PNG from {@link embeddedMark}.
+ * @param variant - committed install icon to produce.
+ * @returns the PNG bytes.
+ */
+async function renderMark(mark: Buffer, variant: AppIconVariant): Promise<Buffer> {
+  const { default: sharp } = await import('sharp')
+  if (variant.kind === 'tile') return sharp(mark).resize(variant.size, variant.size).png().toBuffer()
+  const inner = Math.round(variant.size * MASKABLE_INNER_RATIO)
+  const resized = await sharp(mark).resize(inner, inner).png().toBuffer()
+  const offset = Math.round((variant.size - inner) / 2)
+  return sharp({
+    create: { width: variant.size, height: variant.size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  }).composite([{ input: resized, left: offset, top: offset }]).png().toBuffer()
+}
+
+/**
+ * Render every install icon from the embedded product mark.
  * @param source - complete `icon.svg` document.
  * @returns one PNG per {@link APP_ICON_VARIANTS} entry, in declaration order.
  */
 export async function renderAppIcons(source: string): Promise<readonly { variant: AppIconVariant; png: Buffer }[]> {
+  const mark = embeddedMark(source)
   return Promise.all(APP_ICON_VARIANTS.map(async variant => ({
     variant,
-    png: await renderPng(
-      documentForVariant(source, variant.kind),
-      variant.size,
-    ),
+    png: await renderMark(mark, variant),
   })))
 }
 

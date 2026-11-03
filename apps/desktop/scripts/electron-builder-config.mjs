@@ -253,6 +253,7 @@ export function createElectronBuilderConfig(
     },
     linux: {
       category: 'Development',
+      icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
       target: ['AppImage'],
     },
     nsis: {

@@ -109,7 +109,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     <div className="titlebar" aria-hidden="true" />
     <main className="welcome" aria-labelledby={page === 'entry' ? 'welcome-heading' : 'settings-title'}>
       <div className="brand">
-        <img className="brand-logo" src="assets/kaifang-logo.png" alt={m.welcomeBrand} width="40" height="39" />
+        <img className="brand-logo" src="assets/kaifang-logo.png" alt={m.welcomeBrand} width="40" height="31" />
         <span className="brand-name" aria-hidden="true">{m.welcomeBrand}</span>
       </div>
       <div id="tagline" className="tagline" hidden={page !== 'entry'}>
