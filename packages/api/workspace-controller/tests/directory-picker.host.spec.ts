@@ -51,6 +51,12 @@ async function harness(capability: DirectoryPickerCapability = NATIVE_STUB) {
   StubPicker.capabilityStub = capability
   const ctx = new Context()
   roots.push(ctx)
+  // DirectoryPickerController confines browse paths through workspaceController;
+  // non-platform fixtures leave paths unchanged and never refuse native pick.
+  ctx.provide('workspaceController', {
+    isPlatformUserInvocation: () => false,
+    directoryPickerPath: async (path: string | undefined) => path,
+  } as never)
   await ctx.plugin(StubPicker).await()
   return new DirectoryPickerController(ctx)
 }
@@ -144,15 +150,19 @@ describe('directoryPicker browse Remotes', () => {
   })
 
   it('reports an aborted listing as cancelled', async () => {
+    let listing = false
     const picker = await harness({
       kind: 'browse',
       list: (_path, signal) => new Promise((_resolve, reject) => {
+        listing = true
         signal?.addEventListener('abort', () => { reject(new Error('scan aborted')) }, { once: true })
       }),
       createDirectory: async () => '/never',
     })
     const abort = new AbortController()
     const pending = refused(picker.list(undefined, abort.signal))
+    // list awaits directoryPickerPath before attaching the abort listener.
+    await vi.waitFor(() => { expect(listing).toBe(true) })
     abort.abort()
     expect((await pending).code).toBe('gateway/cancelled')
   })

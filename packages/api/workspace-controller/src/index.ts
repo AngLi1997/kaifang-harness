@@ -6,7 +6,11 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
-import { isKaifangUserPrincipal, platformUserKey } from '@deepseek-ai/dsh-kaifang-platform-auth'
+import {
+  isDeviceAdmittedKaifangUser,
+  isKaifangUserPrincipal,
+  platformUserKey,
+} from '@deepseek-ai/dsh-kaifang-platform-auth'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { WorkspaceCommands } from './commands.ts'
 import { DirectoryPickerController } from './directory-picker.ts'
@@ -103,7 +107,14 @@ export class WorkspaceController extends TypertRemoteService {
   async create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
     const partition = await this.platformPartition()
     if (partition === undefined) return this.commands.create(request)
-    const path = await this.assertPathInPartition(request.path, partition.root)
+    // Desktop Remote Client (device-ticket Peer) picks OS-local folders that may
+    // sit outside the Web partition root on a same-machine shared Host. Keep
+    // ownerId for access policy; browser OAuth Peers stay path-confined below.
+    // Browse/list/createDirectory and initializeDefault remain partition-bound
+    // for every kaifang-user Peer.
+    const path = isDeviceAdmittedKaifangUser(principalOf(this.ctx.invocation))
+      ? request.path
+      : await this.assertPathInPartition(request.path, partition.root)
     const result = await this.commands.create({ path }, partition.ownerId)
     if (result.created) this.ctx.remoteAccess.invalidate(principalOf(this.ctx.invocation))
     return result

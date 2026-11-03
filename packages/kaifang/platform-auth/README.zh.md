@@ -49,7 +49,7 @@ Host 创建 state 与 PKCE verifier，将浏览器转到 IAM；本地授权 URL 
 
 Admission Provider 位于 Connection admission 内，因此 `/api` 请求和 Gateway WebSocket 升级会按登录 Cookie（或 Desktop device ticket / 已准入会话的 Bearer）选择对应的 `kaifang-user` Peer。 Desktop 在已保存可用平台会话时于进入工作区前自动走 device ticket，以 Remote Client 挂共享 Host，无需先退出再登录。登录、回调、device、状态、取消和退出路由使用 Connection 的 Host/Origin 信任检查，但在平台登录前保持可访问。
 
-Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录、只读模型提供方目录、只读设置描述和用户根目录内的目录浏览。会话与工作区变更仍需匹配用户绑定；工作区创建、默认目录初始化和 Session 创建会在 Host 代码中再次限制到本人目录。共享 Host 的 `kaifang-user` Peer 允许列表（`peer-roles.ts`）包含 `workspace/deleteSession`（软删除，与归档彼此独立），以便 Web 与 Desktop Remote Client 隐藏会话而不擦除日志。
+Remote access 的 `global` 资源只开放启动、列表/搜索、模型目录、只读模型提供方目录、只读设置描述和用户根目录内的目录浏览。会话与工作区变更仍需匹配用户绑定。Host 代码将浏览器 OAuth Peer 的工作区创建、默认目录初始化和 Session 创建限制在本人分区内；Desktop device ticket Peer 的 `kaifang-user` principal 带有 `admission: 'device'`，因而 `workspace/create` 可采用分区外、本机 Host 上已存在的绝对目录（browse 与默认初始化仍受分区约束）。共享 Host 的 `kaifang-user` Peer 允许列表（`peer-roles.ts`）包含 `workspace/deleteSession`（软删除，与归档彼此独立），以便 Web 与 Desktop Remote Client 隐藏会话而不擦除日志。
 
 Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `sub` 与 `tid`，才能读取该用户的身份或访问令牌。访问令牌过期或退出后，该接口不再返回令牌。
 

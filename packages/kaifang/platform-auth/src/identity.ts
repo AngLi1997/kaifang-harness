@@ -4,12 +4,21 @@ import { createHash } from 'node:crypto'
 import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
 import { KAIFANG_MODEL_PROVIDER_PREFIX } from './provider-id.ts'
 
+/** How a shared-Host session was admitted for this Peer. */
+export type KaifangAdmissionChannel = 'browser' | 'device'
+
 /** Authenticated Meta identity attached to a shared Host Peer. */
 export interface KaifangUserPrincipal {
   readonly kind: 'kaifang-user'
   readonly sub: string
   readonly tid: string
   readonly clientId: string
+  /**
+   * Admission channel that created the Host session.
+   * `device` is Desktop (or other non-browser) ticket exchange; `browser` is
+   * the Web OAuth cookie. Absent on legacy persisted sessions (treat as browser).
+   */
+  readonly admission?: KaifangAdmissionChannel
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -33,4 +42,12 @@ export function isKaifangUserPrincipal(principal: Principal | undefined): princi
   return principal?.kind === 'kaifang-user'
     && typeof principal.sub === 'string' && principal.sub.length > 0
     && typeof principal.tid === 'string' && principal.tid.length > 0
+}
+
+/**
+ * Desktop device-ticket Peers may adopt Host-local absolute directories outside
+ * the Web partition root; browser OAuth Peers stay sandboxed.
+ */
+export function isDeviceAdmittedKaifangUser(principal: Principal | undefined): boolean {
+  return isKaifangUserPrincipal(principal) && principal.admission === 'device'
 }

@@ -10,6 +10,7 @@ import { RemoteError, type PeerId, type Principal, type RemoteInvocation } from 
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import RemoteAccessService, { type RemoteAccessCondition, type RemoteAccessRole } from '@deepseek-ai/dsh-api-remote-access'
+import { platformUserKey } from '@deepseek-ai/dsh-kaifang-platform-auth'
 import WorkspaceController from '../src/index.ts'
 import { DEFAULT_WORKSPACE_DIRECTORY } from '../src/default-workspace.ts'
 import { WorkspaceFeed } from '../src/feed.ts'
@@ -51,7 +52,10 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve }
 }
 
-async function harness(options: { systemDocuments?: boolean } = {}) {
+async function harness(options: {
+  systemDocuments?: boolean
+  platformUsersRootDirectory?: string
+} = {}) {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-workspace-controller-')))
   tempDirs.push(root)
   const ctx = new Context()
@@ -71,7 +75,13 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
     resources: { register: vi.fn(() => dispose) },
   } as never)
   new RemoteAccessService(ctx)
-  const controller = new WorkspaceController(ctx, options.systemDocuments === true ? {} : { documentsDirectory: root })
+  const config = {
+    ...(options.systemDocuments === true ? {} : { documentsDirectory: root }),
+    ...(options.platformUsersRootDirectory === undefined
+      ? {}
+      : { platformUsersRootDirectory: options.platformUsersRootDirectory }),
+  }
+  const controller = new WorkspaceController(ctx, config)
   return { controller, ctx, root, storageDomain }
 }
 
@@ -97,6 +107,27 @@ function followerContext(ctx: Context, principal: Principal): Context {
     peer: { id: 'workspace-access-peer' as PeerId, ctx, principal, interactions: 'answer', signal: new AbortController().signal, dispose: async () => {} },
     signal: new AbortController().signal,
     uplink: <In>(): AsyncIterable<In> => ({ [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }),
+  }
+  return ctx.extend({ invocation })
+}
+
+/** Bind a unary Workspace Remote invocation so `principalOf` sees `principal`. */
+function invokeAs(ctx: Context, principal: Principal, method = 'create'): Context {
+  const invocation: RemoteInvocation = {
+    request: { namespace: 'workspace', method, args: {} },
+    service: 'workspaceController',
+    peer: {
+      id: 'workspace-partition-peer' as PeerId,
+      ctx,
+      principal,
+      interactions: 'answer',
+      signal: new AbortController().signal,
+      dispose: async () => {},
+    },
+    signal: new AbortController().signal,
+    uplink: <In>(): AsyncIterable<In> => ({
+      [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }),
+    }),
   }
   return ctx.extend({ invocation })
 }
@@ -613,5 +644,61 @@ describe('first-use Remote', () => {
     vi.spyOn(ctx.workspaceRegistry, 'initializeDefault').mockRejectedValueOnce(new Error('permission denied'))
     await expect(controller.initializeDefault(new AbortController().signal))
       .rejects.toThrow('permission denied')
+  })
+})
+
+describe('platform partition create', () => {
+  const browserPrincipal: Principal = {
+    kind: 'kaifang-user',
+    sub: 'user-browser',
+    tid: 'tenant-a',
+    clientId: 'kaifang-harness',
+    admission: 'browser',
+  }
+  const devicePrincipal: Principal = {
+    kind: 'kaifang-user',
+    sub: 'user-desktop',
+    tid: 'tenant-a',
+    clientId: 'kaifang-harness',
+    admission: 'device',
+  }
+
+  it('rejects browser Peers that adopt a directory outside the signed-in user workspace', async () => {
+    const usersRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-platform-users-')))
+    tempDirs.push(usersRoot)
+    const { ctx, root } = await harness({ platformUsersRootDirectory: usersRoot })
+    const outside = stageDir(root, 'outside-browser')
+    await expect(invokeAs(ctx, browserPrincipal).workspaceController.create({ path: outside }))
+      .rejects.toMatchObject({
+        code: 'workspace/invalid-path',
+        message: 'directory is outside the signed-in user workspace',
+      })
+  })
+
+  it('lets browser Peers create inside their partition root', async () => {
+    const usersRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-platform-users-')))
+    tempDirs.push(usersRoot)
+    const { ctx } = await harness({ platformUsersRootDirectory: usersRoot })
+    // Force partition root creation via initializeDefault under the same principal.
+    const defaulted = await invokeAs(ctx, browserPrincipal, 'initializeDefault')
+      .workspaceController.initializeDefault(new AbortController().signal)
+    expect(defaulted).toBeDefined()
+    const inside = stageDir(defaulted!.workspace.path, 'project')
+    const created = await invokeAs(ctx, browserPrincipal).workspaceController.create({ path: inside })
+    expect(created.created).toBe(true)
+    expect(created.workspace.path).toBe(inside)
+  })
+
+  it('lets device-admitted Desktop Peers create at an existing Host-local path outside the partition', async () => {
+    const usersRoot = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-platform-users-')))
+    tempDirs.push(usersRoot)
+    const { ctx, root } = await harness({ platformUsersRootDirectory: usersRoot })
+    const localFolder = stageDir(root, 'desktop-local-folder')
+    const created = await invokeAs(ctx, devicePrincipal).workspaceController.create({ path: localFolder })
+    expect(created.created).toBe(true)
+    expect(created.workspace.path).toBe(localFolder)
+    // ownerId must still bind the Workspace to the platform user for Remote access.
+    const stored = ctx.workspaceRegistry.list().find(workspace => workspace.id === created.workspace.workspaceId)
+    expect(stored?.ownerId).toBe(platformUserKey({ sub: 'user-desktop', tid: 'tenant-a' }))
   })
 })

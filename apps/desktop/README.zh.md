@@ -218,7 +218,7 @@ Web 侧的对应命令是 `pnpm run dev:web` 与 `pnpm run start:web`，见[开�
 
 Welcome 提供平台 IAM 账号密码登录和一键 OAuth 入口。设置页只填写平台根地址，例如 `http://127.0.0.1:3001`；Desktop 打开平台公开的 `/harness` 路由，该页面再跳转到平台部署配置的共享 Harness Host。Host 使用 `kaifang-harness` 发起 PKCE 授权，账号登录后平台显示 OAuth 授权确认页。平台根地址由用户在 Welcome 设置页输入并保存在本机；Desktop 不会读取其他仓库的 `.env`，也没有构建时默认值。账号密码由主进程通过共享窗口使用的持久 Electron Session 提交给平台 IAM，随后 Host 完成 OAuth 流程。本地 API Key 仍可在模型设置中配置；本地 Session 不会复制到共享 Host。
 
-若本机已保存平台根地址且平台会话仍可用（或可刷新），冷启动以及之后每次 `enterWorkspace` 都会在壳层文档加载前重试 `activateSharedHostIfPossible`：Desktop 交换 device ticket，以 Remote Client（`ownsHost=false`）挂到共享 Host，并同步工作区、Session 与模型，无需先退出再登录。若 access token 已过期且无法刷新，Desktop 会提示重新平台登录，而不是一直静默停在本地 Host。共享 Host 不可达时仍使用内嵌本地 Host，并在下次进入工作区时重试挂载。Web 与 Desktop 之间的工作区创建/重命名/删除双向刷新，在两端都已挂到同一共享 Host 后，由既有的 `workspace/follow` 推送完成。
+若本机已保存平台根地址且平台会话仍可用（或可刷新），冷启动以及之后每次 `enterWorkspace` 都会在壳层文档加载前重试 `activateSharedHostIfPossible`：Desktop 交换 device ticket，以 Remote Client（`ownsHost=false`）挂到共享 Host，并同步工作区、Session 与模型，无需先退出再登录。若 access token 已过期且无法刷新，Desktop 会提示重新平台登录，而不是一直静默停在本地 Host。共享 Host 不可达时仍使用内嵌本地 Host，并在下次进入工作区时重试挂载。Web 与 Desktop 之间的工作区创建/重命名/删除双向刷新，在两端都已挂到同一共享 Host 后，由既有的 `workspace/follow` 推送完成。经原生 Desktop 目录选择器打开本机文件夹时，在该共享 Host 上以 device 准入 Peer 创建工作区（允许本机绝对路径落在 Web 分区外）；离线（`ownsHost=true`）时仍在内嵌本地 Host 上创建，无分区约束。
 
 当既没有 DeepSeek 账号也没有 API Key 时，启动显示原生 Welcome 登录页；用户可用平台账号密码登录，或一键进入 Harness OAuth 流程。账号密码经主进程提交到平台 IAM，SSO Cookie 写入共享窗口使用的持久分区；Host 随后执行 PKCE 授权并显示确认页。平台根地址由用户在 Welcome 设置页输入并保存在本机；桌面不会读取其他仓库的 `.env`，也没有构建时默认值。已有本地账号或 API Key 时直接进入工作区壳层（共享 Host 激活成功则挂 Remote Client，否则本地 Host）。
 

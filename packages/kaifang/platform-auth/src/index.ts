@@ -29,8 +29,13 @@ export {
   PLATFORM_USER_SESSION_ACTIONS,
   PLATFORM_USER_WORKSPACE_ACTIONS,
 } from './peer-roles.ts'
-export { isKaifangUserPrincipal, platformModelProviderId, platformUserKey } from './identity.ts'
-export type { KaifangUserPrincipal } from './identity.ts'
+export {
+  isDeviceAdmittedKaifangUser,
+  isKaifangUserPrincipal,
+  platformModelProviderId,
+  platformUserKey,
+} from './identity.ts'
+export type { KaifangAdmissionChannel, KaifangUserPrincipal } from './identity.ts'
 
 const AUTH_PATH = '/kaifang/auth'
 const CALLBACK_SUFFIX = `${AUTH_PATH}/callback`
@@ -134,6 +139,8 @@ interface StoredSession {
   readonly expiresAt: number
   readonly scopes: readonly string[]
   readonly user: PlatformUser
+  /** Browser OAuth cookie vs Desktop device-ticket exchange. */
+  readonly admission: 'browser' | 'device'
 }
 
 interface Attempt {
@@ -195,6 +202,7 @@ function parseStored(value: unknown): StoredSession | undefined {
     || !Array.isArray(input.scopes) || !input.scopes.every(scope => typeof scope === 'string')
     || user.sub !== input.sub || typeof user.username !== 'string' || typeof user.displayName !== 'string'
     || !(user.email === null || typeof user.email === 'string')) return undefined
+  const admission = input.admission === 'device' ? 'device' as const : 'browser' as const
   return {
     version: RECORD_VERSION,
     sub: input.sub,
@@ -204,6 +212,7 @@ function parseStored(value: unknown): StoredSession | undefined {
     expiresAt: input.expiresAt,
     scopes: input.scopes,
     user: { sub: input.sub, username: user.username, displayName: user.displayName, email: user.email },
+    admission,
   }
 }
 
@@ -467,10 +476,10 @@ class PlatformSession {
     return session !== undefined && session.expiresAt > Date.now()
   }
 
-  identity(sessionId: string | undefined): Pick<KaifangUserPrincipal, 'sub' | 'tid'> | undefined {
+  identity(sessionId: string | undefined): Pick<KaifangUserPrincipal, 'sub' | 'tid' | 'admission'> | undefined {
     const session = sessionId === undefined ? undefined : this.sessions.get(sessionId)
     if (session === undefined || session.expiresAt <= Date.now()) return undefined
-    return { sub: session.sub, tid: session.tid }
+    return { sub: session.sub, tid: session.tid, admission: session.admission }
   }
 
   start(req: IncomingMessage, listenerPort?: number): {
@@ -531,7 +540,7 @@ class PlatformSession {
       code_verifier: attempt.verifier,
     })
     const user = await this.userinfo(token.accessToken, token.sub)
-    const session: StoredSession = { version: RECORD_VERSION, ...token, user }
+    const session: StoredSession = { version: RECORD_VERSION, ...token, user, admission: 'browser' }
     await this.save(sessionId, session)
     return session
   }
@@ -636,6 +645,7 @@ class PlatformSession {
       expiresAt: finalExpiresAt,
       scopes: finalScopes,
       user,
+      admission: 'device',
     }
     await this.save(sessionId, session)
     return {
@@ -697,7 +707,7 @@ class PlatformSession {
         // Logout removes the exact in-memory record before awaiting this
         // refresh; never let the late response recreate that session.
         if (this.sessions.get(sessionId) !== current) return undefined
-        const refreshed: StoredSession = { version: RECORD_VERSION, ...token, user }
+        const refreshed: StoredSession = { version: RECORD_VERSION, ...token, user, admission: current.admission }
         await this.save(sessionId, refreshed)
         return refreshed
       } catch (error) {
