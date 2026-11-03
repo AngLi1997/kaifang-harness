@@ -1251,7 +1251,7 @@ async function main(): Promise<void> {
   const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
     : join(process.resourcesPath, 'icon.png')
   // Packaged Dock art is the icns electron-builder builds from icon-macos.png.
-  // Development has no bundle icon, so set the same opaque studio mark directly.
+  // Development has no bundle icon, so set that same rounded studio mark directly.
   if (process.platform === 'darwin' && development) {
     app.dock?.setIcon(nativeImage.createFromPath(join(app.getAppPath(), 'resources', 'icon-macos.png')))
   }
