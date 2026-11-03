@@ -91,6 +91,8 @@ export interface WorkspaceDeleteRequest {
 /** Receipt after one Workspace registration is deleted. */
 export interface WorkspaceDeleteValue {
   readonly deleted: true
+  /** Complete soft-delete set after members of the deleted Workspace were hidden. */
+  readonly deletedSessionIds: readonly SessionId[]
 }
 
 /** DOM-insertBefore-like Workspace order mutation. */

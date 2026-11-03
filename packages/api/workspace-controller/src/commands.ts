@@ -93,14 +93,15 @@ export class WorkspaceCommands {
   }
 
   /**
-   * Delete one Workspace registration without deleting its directory or Sessions.
-   * Ownership for a shared multi-user Host is resolved inside the queue so a
-   * concurrent rename cannot leapfrog an in-flight delete that still awaits
-   * platform partition setup before enqueueing.
+   * Delete one Workspace registration without deleting its directory or Session
+   * logs. Accounted Sessions are soft-deleted atomically with the registration
+   * drop (they do not move to Ungrouped). Ownership for a shared multi-user Host
+   * is resolved inside the queue so a concurrent rename cannot leapfrog an
+   * in-flight delete that still awaits platform partition setup before enqueueing.
    * @param request - Workspace identity to remove.
    * @param ownerIdOf - optional async owner id; when set, delete refuses a
    *   Workspace the caller does not own (as `workspace/not-found`).
-   * @returns deletion confirmation.
+   * @returns deletion confirmation plus the complete soft-delete set.
    */
   delete(
     request: WorkspaceDeleteRequest,
@@ -114,14 +115,17 @@ export class WorkspaceCommands {
           if (workspace === undefined || workspace.ownerId !== ownerId) {
             throw workspaceNotFound(request.workspaceId)
           }
-          // Sessions stay on disk and become Ungrouped when registration drops.
         }
       }
       if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }
       this.ctx.remoteAccess.invalidate(principalOf(this.ctx.invocation))
-      return { deleted: true }
+      return {
+        deleted: true,
+        deletedSessionIds: [...this.ctx.workspaceRegistry.deletedSessionIds]
+          .filter(sessionId => this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })),
+      }
     })
   }
 

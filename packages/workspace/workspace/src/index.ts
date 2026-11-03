@@ -311,9 +311,12 @@ export class WorkspaceRegistry extends Service {
 
   /**
    * Delete one workspace registration while retaining its directory and every
-   * session log. The durable order is updated before the table deletion; a
-   * failed table write restores the prior order and keeps the entity
-   * published. Unknown ids are an idempotent no-op for domain callers.
+   * session log. Accounted Sessions are soft-deleted in the same durable write
+   * (added to {@link deletedSessionIds}, cleared from archive/pin) with
+   * `stopActivity`, so they do not reappear under Ungrouped. The durable order
+   * is updated before the table deletion; a failed table write restores the
+   * prior order, soft-delete set, and keeps the entity published. Unknown ids
+   * are an idempotent no-op for domain callers.
    * @param id - Workspace registration to remove.
    * @returns `true` when a record was deleted, `false` when it was unknown.
    */
@@ -646,17 +649,31 @@ export class WorkspaceRegistry extends Service {
     const entity = this.entities.get(id)
     if (entity === undefined) return false
     const state = this.requireState()
-    const nextState = {
+    // Soft-delete every accounted Session in the same durable mutation so a
+    // registration drop cannot spill members into Ungrouped.
+    const alreadyDeleted = new Set(state.deletedSessionIds ?? [])
+    const newlyDeleted: SessionId[] = []
+    for (const sessionId of entity.sessionIds) {
+      if (alreadyDeleted.has(sessionId)) continue
+      if (!(await this.sessionKnown(sessionId))) continue
+      newlyDeleted.push(sessionId)
+    }
+    const newlyDeletedSet = new Set(newlyDeleted)
+    const nextState: WorkspaceDomainState = {
       ...state,
       pendingMutation: undefined,
       initialized: true,
       workspaceIds: state.workspaceIds.filter(workspaceId => workspaceId !== id),
+      deletedSessionIds: [...(state.deletedSessionIds ?? []), ...newlyDeleted],
+      archivedSessionIds: state.archivedSessionIds.filter(sessionId => !newlyDeletedSet.has(sessionId)),
+      pinnedSessionIds: state.pinnedSessionIds.filter(sessionId => !newlyDeletedSet.has(sessionId)),
     }
     await this.setState({
       ...nextState,
       pendingMutation: { operation: 'delete', workspaceId: id },
     })
     this.entities.delete(id)
+    for (const sessionId of newlyDeleted) await this.stopSessionActivity(sessionId)
     try {
       await this.requireTable().delete(id)
     } catch (error) {

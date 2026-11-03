@@ -76,7 +76,7 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
   onRename: (request: WorkspaceRenameRequest) => Promise<RemoteResult<WorkspaceValue>> = request =>
     Promise.resolve(remoteOk({ workspace: { ...workspace(String(request.workspaceId)), title: request.title } }))
   onDelete: (_request: WorkspaceDeleteRequest) => Promise<RemoteResult<WorkspaceDeleteValue>> = () =>
-    Promise.resolve(remoteOk({ deleted: true }))
+    Promise.resolve(remoteOk({ deleted: true, deletedSessionIds: [] }))
   onInsertBefore: (
     request: WorkspaceInsertBeforeRequest,
   ) => Promise<RemoteResult<WorkspaceOrderValue>> = request =>

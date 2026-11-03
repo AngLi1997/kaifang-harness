@@ -1,12 +1,13 @@
 /**
  * Derives the workspace browser tree from caller-projected Workspace and
- * Session order. Unassigned Sessions trail under Ungrouped; only the selected
+ * Session order. Unassigned Sessions and the initializeDefault Workspace share the default bucket; only the selected
  * blank Session remains visible.
  */
 import {
   type SessionListState, type SessionSearchResultItem, type SessionSummary,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import { DEFAULT_WORKSPACE_DIRECTORY } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type {
   SessionStatusSnapshot,
 } from '@deepseek-ai/dsh-client-ui-session/client'
@@ -27,8 +28,12 @@ export function owningGroupKey(
   workspaces: readonly WorkspaceView[],
   sessionId: SessionId,
 ): string {
-  return (workspaces.find(workspace => workspace.sessionIds.includes(sessionId))
-    ?.workspaceId as string | undefined) ?? UNGROUPED_KEY
+  const workspace = workspaces.find(item => item.sessionIds.includes(sessionId))
+  if (workspace === undefined) return UNGROUPED_KEY
+  // The system default bucket absorbs the initializeDefault Workspace so the
+  // sidebar shows one "Default workspace" row, not two.
+  if (workspace.title === DEFAULT_WORKSPACE_DIRECTORY) return UNGROUPED_KEY
+  return workspace.workspaceId as string
 }
 
 /** Pending interaction kinds with dedicated Workspace-row presentation. */
@@ -324,9 +329,10 @@ function orderedUngrouped(
 
 /**
  * Group Sessions by Workspace: one group per caller-ordered entity, with
- * members resolved from caller-ordered sessionIds. Sessions outside every
- * Workspace trail in the browser-local Ungrouped order, which falls back to
- * recency before that order is initialized.
+ * members resolved from caller-ordered sessionIds. The initializeDefault
+ * Workspace and unassigned Sessions share one trailing system bucket (always
+ * shown, except archived-only with no members) labeled by the UI as the
+ * default workspace.
  */
 function groupByWorkspace(
   list: SessionListState,
@@ -339,6 +345,8 @@ function groupByWorkspace(
   const current = mainSessionId(list)
   const groups: Group[] = []
   const accounted = new Set<SessionId>()
+  let defaultWorkspace: WorkspaceView | undefined
+  const defaultMembers: SessionSummary[] = []
   for (const workspace of workspaces) {
     const members: SessionSummary[] = []
     for (const id of workspace.sessionIds) {
@@ -347,6 +355,11 @@ function groupByWorkspace(
       accounted.add(id)
       if (!sessionVisible(summary, current, archived, archivedFilter, deleted)) continue
       members.push(summary)
+    }
+    if (workspace.title === DEFAULT_WORKSPACE_DIRECTORY) {
+      defaultWorkspace = workspace
+      defaultMembers.push(...members)
+      continue
     }
     // The archived-only view lists archives, not the Workspace inventory, so
     // a Workspace without archived Sessions contributes no group.
@@ -360,14 +373,19 @@ function groupByWorkspace(
     .map(id => list.byId[id])
     .filter((s): s is SessionSummary =>
       s !== undefined && !accounted.has(s.id) && sessionVisible(s, current, archived, archivedFilter, deleted))
-  if (stray.length > 0) {
+  const defaultBucket = [
+    ...defaultMembers,
+    ...orderedUngrouped(stray, ungroupedOrder, list.byId),
+  ]
+  // System default bucket stays visible even when empty (not archived-only).
+  if (!(archivedFilter === 'only' && defaultBucket.length === 0)) {
     groups.push(buildGroup(
       UNGROUPED_KEY,
-      undefined,
-      undefined,
-      undefined,
+      defaultWorkspace?.workspaceId,
+      defaultWorkspace?.path,
+      defaultWorkspace === undefined ? undefined : Date.parse(defaultWorkspace.createdAt),
       '',
-      orderedUngrouped(stray, ungroupedOrder, list.byId),
+      defaultBucket,
     ))
   }
   return groups

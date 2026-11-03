@@ -26,9 +26,9 @@ export function workspaceLabel(cwd: string): string {
 /**
  * The workspace chip (folder + label + chevron), always interactive: before
  * the first message the workspace stays switchable — picking another one
- * moves the New Session flow to that workspace's blank session. Without a
- * label the chip renders its placeholder state: closed folder + the
- * "Choose workspace" call to action.
+ * moves the New Session flow to that workspace's blank session. The visible
+ * label and `aria-label` stay aligned (current workspace / Default workspace,
+ * or the "Choose workspace" placeholder when `label` is omitted).
  * @param props.label - chip label (see {@link workspaceLabel}); omitted → placeholder.
  * @param props.menuOpen - menu expansion echo.
  * @param props.onClick - menu toggle.
@@ -46,7 +46,7 @@ export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, t }
       ref={buttonRef}
       type="button"
       className={css.workspace}
-      aria-label={t('hero.chooseWorkspace')}
+      aria-label={label ?? t('hero.chooseWorkspace')}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
       onClick={onClick}

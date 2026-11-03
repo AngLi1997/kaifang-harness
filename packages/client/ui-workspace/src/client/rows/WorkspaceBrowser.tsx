@@ -27,7 +27,7 @@ import type {
   SessionListState, SessionSearchResultItem,
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
+import { DEFAULT_WORKSPACE_DIRECTORY, workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
@@ -340,6 +340,16 @@ function SessionTree({
     return sessionIds.filter((id) => {
       const session = list.byId[id]
       return session !== undefined && !session.blank && !rowState.archivedSessionIds.includes(id)
+        && !rowState.deletedSessionIds.includes(id)
+    })
+  }
+  const deletableSessionIds = (workspaceId: WorkspaceId | undefined): SessionId[] => {
+    const sessionIds = workspaceId === undefined
+      ? ungroupedSessionIds
+      : workspaces.find(workspace => workspace.workspaceId === workspaceId)?.sessionIds ?? []
+    return sessionIds.filter((id) => {
+      const session = list.byId[id]
+      return session !== undefined && !rowState.deletedSessionIds.includes(id)
     })
   }
   const revealGroup = revealSessionId === undefined || !workspaceReady
@@ -384,12 +394,17 @@ function SessionTree({
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
       .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
   }, [groupExpansion, parents, workspaces])
+  const defaultWorkspaceName = t('workspace.defaultName')
   const groups = useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
+    }).map(group => (
+      group.key === UNGROUPED_KEY
+        ? group
+        : { ...group, label: workspaceDisplayTitle(group.label, defaultWorkspaceName) }
+    )),
+    [defaultWorkspaceName, list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -586,19 +601,39 @@ function SessionTree({
             }
           }}
           drag={workspaceDragProps}
-          clearableSessionIds={clearableSessionIds(workspaceId)}
+          clearableSessionIds={group.key === UNGROUPED_KEY
+            ? [
+              ...(workspaces.find(workspace => workspace.title === DEFAULT_WORKSPACE_DIRECTORY)?.sessionIds ?? []),
+              ...ungroupedSessionIds,
+            ].filter((id) => {
+              const session = list.byId[id]
+              return session !== undefined && !session.blank
+                && !rowState.archivedSessionIds.includes(id)
+                && !rowState.deletedSessionIds.includes(id)
+            })
+            : clearableSessionIds(workspaceId)}
+          deletableSessionIds={group.key === UNGROUPED_KEY ? [] : deletableSessionIds(workspaceId)}
           actions={{
-            clear: () => onClearRequest(workspaceId, workspaceId === undefined ? t('group.ungrouped') : group.label),
-            ...(workspaceId === undefined ? {} : {
-              rename: () => onRenameRequest(workspaceId, group.label),
-              delete: () => onDeleteRequest(workspaceId, group.label),
-            }),
+            clear: () => onClearRequest(
+              group.key === UNGROUPED_KEY ? undefined : workspaceId,
+              group.key === UNGROUPED_KEY ? t('group.ungrouped') : group.label,
+            ),
+            // System default bucket: clear only.
+            ...(group.key === UNGROUPED_KEY || workspaceId === undefined
+              ? {}
+              : {
+                rename: () => onRenameRequest(workspaceId, group.label),
+                delete: () => onDeleteRequest(workspaceId, group.label),
+              }),
           }}
         />
         {childRows.length > 0 && (
           <div role="group">
             {childRows}
           </div>
+        )}
+        {group.expanded && group.key === UNGROUPED_KEY && sessions.length === 0 && childRows.length === 0 && (
+          <div className={css.groupEmpty} data-row-key={`empty:${group.key}`}>{t('empty.none')}</div>
         )}
         {sessions.map((node) => {
         // Session drag never leaves its browser-local account, and pinned
@@ -960,16 +995,10 @@ export function WorkspaceBrowser({
   // Ordering remains live while the rail or search replaces the list body.
   const list = useSessions(state => state)
   const storedWorkspaces = useWorkspaces(state => state.items)
-  // The resolved name, not `t`, is the memo dependency: the bound seat keeps
-  // its identity across a language switch.
-  const defaultWorkspaceName = t('workspace.defaultName')
-  const workspaces = useMemo(
-    () => storedWorkspaces.map(workspace => ({
-      ...workspace,
-      title: workspaceDisplayTitle(workspace.title, defaultWorkspaceName),
-    })),
-    [storedWorkspaces, defaultWorkspaceName],
-  )
+  // Stored titles feed default-workspace detection in the tree; row labels
+  // localize through workspaceDisplayTitle / group.ungrouped at the edge.
+  // (defaultWorkspaceName is resolved inside SessionTree where labels are mapped.)
+  const workspaces = storedWorkspaces
   const workspacePhase = useWorkspaces(state => state.phase)
   const workspaceStreamState = useWorkspaces(state => state.state)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
@@ -1263,6 +1292,14 @@ export function WorkspaceBrowser({
   const [deleting, setDeleting] = useState(false)
   const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const deleteMemberIds = deleteTarget === null ? [] : (
+    workspaces.find(workspace => workspace.workspaceId === deleteTarget.workspaceId)?.sessionIds ?? []
+  ).filter((id) => {
+    const session = list.byId[id]
+    return session !== undefined && !deletedSessionIds.includes(id)
+  })
+  // Confirm copy counts started conversations only; blanks are still soft-deleted.
+  const deleteSessionIds = deleteMemberIds.filter(id => list.byId[id]?.blank !== true)
   useEffect(() => {
     if (deleteCommittedId === null
       || workspaces.some(workspace => workspace.workspaceId === deleteCommittedId)) return
@@ -1283,7 +1320,7 @@ export function WorkspaceBrowser({
     setDeleteError(null)
     deleteWorkspace(deleteTarget.workspaceId).then(() => {
       // Keep the confirmation pending until this component has rendered the
-      // committed list projection without the deleted id. Closing earlier
+      // committed list projection without the deleted target. Closing earlier
       // exposes one stale React frame to the next Create Workspace gesture.
       setDeleteCommittedId(deleteTarget.workspaceId)
     }).catch((reason: unknown) => {
@@ -1295,9 +1332,13 @@ export function WorkspaceBrowser({
   const [clearTarget, setClearTarget] = useState<{ workspaceId: WorkspaceId | undefined; title: string } | null>(null)
   const [clearing, setClearing] = useState(false)
   const [clearError, setClearError] = useState<string | null>(null)
+  const defaultWorkspace = storedWorkspaces.find(workspace => workspace.title === DEFAULT_WORKSPACE_DIRECTORY)
   const clearSessionIds = clearTarget === null ? [] : (
     clearTarget.workspaceId === undefined
-      ? ungroupedMemberIds
+      ? [
+        ...(defaultWorkspace?.sessionIds ?? []),
+        ...ungroupedMemberIds,
+      ]
       : workspaces.find(workspace => workspace.workspaceId === clearTarget.workspaceId)?.sessionIds ?? []
   ).filter((id) => {
     const session = list.byId[id]
@@ -1615,10 +1656,10 @@ export function WorkspaceBrowser({
         open={deleteTarget !== null}
         onClose={closeDelete}
         closeLabel={t('close')}
-        title={t('delete.workspace')}
-        {...deleteTarget === null
+        title={t('delete.title', { name: deleteTarget?.title ?? '' })}
+        {...deleteTarget === null || deleteSessionIds.length === 0
           ? {}
-          : { description: t('delete.desc', { name: deleteTarget.title }) }}
+          : { description: t('delete.desc', { n: deleteSessionIds.length }) }}
         footer={(
           <>
             <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
@@ -1628,7 +1669,7 @@ export function WorkspaceBrowser({
               disabled={deleting}
               onClick={confirmDelete}
             >
-              {t('delete.workspace')}
+              {t('delete.action')}
             </Button>
           </>
         )}

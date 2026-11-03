@@ -9372,7 +9372,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkspaceDeleteValue',
-    declaration: 'export interface WorkspaceDeleteValue {\n    readonly deleted: true;\n}',
+    declaration: 'export interface WorkspaceDeleteValue {\n    readonly deleted: true;\n    readonly deletedSessionIds: readonly SessionId[];\n}',
   },
   {
     name: 'WorkspaceDiffHunk',

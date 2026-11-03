@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
-import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
+import { DEFAULT_WORKSPACE_DIRECTORY, workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { ConversationContentProps, ConversationViewsProps, InputZone } from '../contract/slots.ts'
 import { HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
 import css from './ConversationRoot.module.css'
@@ -88,14 +88,13 @@ export function ConversationContent(props: ConversationContentProps) {
 
   // The chip is a selector; label resolution walks the flow top-down:
   //   1. a just-picked workspace (pending) → its title;
-  //   2. cold start, no session yet → placeholder ("Choose workspace");
+  //   2. cold start / no owning workspace → system default bucket label;
   //   3. the blank session's workspace is in the list → its title;
   //   4. list still loading → cwd folder name bridges so the title does not
-  //      flash on refresh (empty cwd → placeholder);
-  //   5. list ready but no owning workspace → no-workspace label, never a
-  //      deleted Workspace's folder name via cwd.
+  //      flash on refresh (empty cwd → default bucket label).
   // A title still automatic reads in the reader's language, matching the
   // sidebar row the same Workspace has there.
+  const defaultWorkspace = workspaces.items.find(workspace => workspace.title === DEFAULT_WORKSPACE_DIRECTORY)
   const storedChipTitle = pendingWorkspace?.title
     ?? (sessionId === undefined
       ? undefined
@@ -103,8 +102,10 @@ export function ConversationContent(props: ConversationContentProps) {
         ?? (workspaces.phase === 'ready' || cwd === undefined || cwd === ''
           ? undefined
           : workspaceLabel(cwd)))
+  // New / unassigned Sessions show the system default bucket name — never a
+  // lingering "Choose workspace" placeholder once the shell is up.
   const chipTitle = storedChipTitle === undefined
-    ? (sessionId !== undefined && workspaces.phase === 'ready' ? t('hero.noWorkspace') : undefined)
+    ? t('hero.noWorkspace')
     : workspaceDisplayTitle(storedChipTitle, t('workspace.defaultName'))
 
   const heroWorkspaceRow = (
@@ -119,8 +120,11 @@ export function ConversationContent(props: ConversationContentProps) {
       {renderSlot('conversation.hero.workspace', {
         open: pickerOpen,
         anchorRef: pickerAnchor,
-        selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId
-          ?? (sessionId !== undefined && workspaces.phase === 'ready' ? null : undefined),
+        selectedId: pendingWorkspaceId
+          ?? sessionWorkspace?.workspaceId
+          ?? (workspaces.phase !== 'ready'
+            ? undefined
+            : (defaultWorkspace?.workspaceId ?? null)),
         onPick: (workspaceId) => {
           setPickerOpen(false)
           setPendingWorkspaceId(workspaceId ?? undefined)

@@ -220,6 +220,7 @@ type ProjectRowItemProps = {
   } | undefined
   /** Unarchived, nonblank Sessions this group can clear. */
   clearableSessionIds?: readonly SessionId[] | undefined
+  deletableSessionIds?: readonly SessionId[] | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -254,6 +255,7 @@ interface ProjectRowAccess {
  */
 export function ProjectRowItem(props: ProjectRowItemProps) {
   const [clearAccess, setClearAccess] = useState<ReadonlyMap<SessionId, boolean>>(new Map())
+  const [deleteAccess, setDeleteAccess] = useState<ReadonlyMap<SessionId, boolean>>(new Map())
   const reportClearAccess = useCallback((sessionId: SessionId, allowed: boolean) => {
     setClearAccess((previous) => {
       if (previous.get(sessionId) === allowed) return previous
@@ -262,48 +264,79 @@ export function ProjectRowItem(props: ProjectRowItemProps) {
       return next
     })
   }, [])
+  const reportDeleteAccess = useCallback((sessionId: SessionId, allowed: boolean) => {
+    setDeleteAccess((previous) => {
+      if (previous.get(sessionId) === allowed) return previous
+      const next = new Map(previous)
+      next.set(sessionId, allowed)
+      return next
+    })
+  }, [])
   const clearableSessionIds = props.clearableSessionIds ?? []
+  const deletableSessionIds = props.deletableSessionIds ?? []
   const clearAllowed = clearableSessionIds.length > 0
     && clearableSessionIds.every(sessionId => clearAccess.get(sessionId) === true)
+  // Empty groups stay deletable (confirm with no body); otherwise every member must allow soft-delete.
+  const deleteMembersAllowed = deletableSessionIds.length === 0
+    || deletableSessionIds.every(sessionId => deleteAccess.get(sessionId) === true)
+  const isDefaultBucket = props.group.workspaceId === undefined
+    || props.group.key === ''
   const rowProps = {
     ...props,
     actions: props.actions === undefined ? undefined : {
       ...props.actions,
       clear: clearAllowed ? props.actions.clear : undefined,
+      // System default bucket: clear only — never rename/delete.
+      rename: isDefaultBucket ? undefined : props.actions.rename,
+      delete: isDefaultBucket || !deleteMembersAllowed ? undefined : props.actions.delete,
     },
   }
   const workspaceId = props.group.workspaceId
+  // UNGROUPED_KEY ('') is the system default bucket even when it carries the
+  // initializeDefault Workspace id for create/clear targeting.
+  const systemDefaultBucket = props.group.key === ''
   return (
     <>
       {clearableSessionIds.map(sessionId => (
         <SessionAccessProbe
-          key={sessionId}
+          key={`archive:${sessionId}`}
           sessionId={sessionId}
+          action="workspace/archiveSession"
           useSessionAccess={props.useSessionAccess}
           onChange={reportClearAccess}
         />
       ))}
-      {workspaceId === undefined
+      {!systemDefaultBucket && deletableSessionIds.map(sessionId => (
+        <SessionAccessProbe
+          key={`delete:${sessionId}`}
+          sessionId={sessionId}
+          action="workspace/deleteSession"
+          useSessionAccess={props.useSessionAccess}
+          onChange={reportDeleteAccess}
+        />
+      ))}
+      {systemDefaultBucket || workspaceId === undefined
         ? <UngroupedProjectRow {...rowProps} />
         : <WorkspaceProjectRow {...rowProps} workspaceId={workspaceId} />}
     </>
   )
 }
 
-/** Subscribe to one Session's archive permission for the group clear action. */
+/** Subscribe to one Session Remote permission for a group header action. */
 function SessionAccessProbe({
-  sessionId, useSessionAccess, onChange,
+  sessionId, action, useSessionAccess, onChange,
 }: {
   sessionId: SessionId
+  action: 'workspace/archiveSession' | 'workspace/deleteSession'
   useSessionAccess: WorkspaceBrowserProps['useSessionAccess']
   onChange: (sessionId: SessionId, allowed: boolean) => void
 }) {
-  const allowed = useSessionAccess(sessionId, 'workspace/archiveSession')
+  const allowed = useSessionAccess(sessionId, action)
   useEffect(() => { onChange(sessionId, allowed) }, [sessionId, allowed, onChange])
   return null
 }
 
-/** The ungrouped bucket's header: no Workspace resource, so starting a Session there asks the global resource. */
+/** The default-workspace bucket: system name, clear-only; no rename/delete. */
 function UngroupedProjectRow(props: ProjectRowItemProps) {
   const create = props.useRemoteAccess('session/create')
   return <ProjectRow {...props} access={{ create, rename: false, delete: false, reorder: false }} />
@@ -326,8 +359,8 @@ function ProjectRow({
 }: ProjectRowItemProps & { access: ProjectRowAccess }) {
   const drag = access.reorder ? offeredDrag : undefined
   const row = group
-  // The ungrouped bucket has no workspace title: its label is dictionary copy.
-  const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
+  // System default bucket uses dictionary copy; real Workspaces use localized labels.
+  const label = row.key === '' ? t('group.ungrouped') : row.label
   const active = containsCurrentDescendant || (group.expanded && group.containsCurrent)
   const [menuOpen, setMenuOpen] = useState(false)
   const dragPreview = useRowDragPreview(css.dragPreview as string)
@@ -336,7 +369,12 @@ function ProjectRow({
     ...(actions?.clear === undefined ? [] : [{
       id: 'clear', label: t('menu.clearConversations'), icon: <IconArchiveOutlineRegular />,
     }]),
-    ...(actions?.delete === undefined || !access.delete ? [] : [{ id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true }]),
+    ...(actions?.delete === undefined || !access.delete ? [] : [{
+      id: 'delete',
+      label: row.workspaceId === undefined ? t('delete.action') : t('delete.workspace'),
+      icon: <IconTrashOutlineRegular />,
+      danger: true,
+    }]),
   ]
   const ownRow = (
     <div

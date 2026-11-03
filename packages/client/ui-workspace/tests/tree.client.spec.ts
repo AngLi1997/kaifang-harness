@@ -258,7 +258,7 @@ describe('deriveGroups', () => {
     const sessions = list(summary('newer', 20), summary('older', 10))
     const workspaces = [workspace('first', ['older', 'newer']), workspace('empty', [])]
     const groups = deriveGroups(sessions, workspaces, noRows, noAttention, view(['first']))
-    expect(groups.map(group => group.key)).toEqual(['first', 'empty'])
+    expect(groups.map(group => group.key)).toEqual(['first', 'empty', UNGROUPED_KEY])
     expect(groups[0]!.sessions.map(session => session.id)).toEqual([sid('older'), sid('newer')])
   })
 
@@ -289,6 +289,26 @@ describe('deriveGroups', () => {
       expect(deriveFlat(list(awaiting), [awaiting.id], noRows, attention)[0]?.pendingInteraction).toBe(kind)
     },
   )
+
+  it('absorbs the initializeDefault Workspace into the system default bucket', () => {
+    const owned = summary('owned', 1, '/docs/deepseek-harness/default-workspace')
+    const loose = summary('loose', 9, '/other')
+    const defaultWs = {
+      ...workspace('default', ['owned']),
+      title: 'default-workspace',
+      path: '/docs/deepseek-harness/default-workspace',
+    }
+    const groups = deriveGroups(
+      list(owned, loose),
+      [defaultWs, workspace('other', [])],
+      noRows,
+      noAttention,
+      view([UNGROUPED_KEY, 'other']),
+    )
+    expect(groups.map(group => group.key)).toEqual(['other', UNGROUPED_KEY])
+    expect(groups[1]!.workspaceId).toBe(wid('default'))
+    expect(groups[1]!.sessions.map(session => session.id)).toEqual([sid('owned'), sid('loose')])
+  })
 
   it('puts only real unaccounted Sessions in the trailing Ungrouped group', () => {
     const sessions = list(summary('owned', 1, '/projects/first'), summary('loose', 9, '/other'))
@@ -330,12 +350,14 @@ describe('deriveGroups', () => {
     expect(blankNode.blank).toBe(true)
     expect(groups[0]!.sessions.find(session => session.id === real.id)!.blank).toBe(false)
     expect(groups[0]!.sessionCount).toBe(2)
-    // A non-current blank stray never surfaces an Ungrouped bucket either.
+    // A non-current blank stray stays out of the default bucket's rows, but
+    // the system default bucket itself remains visible.
     const strayGroups = deriveGroups(
       list({ ...summary('stray', 2), blank: true }),
       [workspace('first', [])], noRows, noAttention, view(),
     )
-    expect(strayGroups.map(group => group.key)).toEqual(['first'])
+    expect(strayGroups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY])
+    expect(strayGroups.find(group => group.key === UNGROUPED_KEY)!.sessions).toEqual([])
   })
 
   it('projects the completion reminder into session and search rows (absent = false)', () => {
@@ -473,7 +495,7 @@ describe('deriveGroups', () => {
     expect(groups[0]!.sessions.map(node => node.id)).toEqual([sid('present')])
   })
 
-  it('hides archived sessions from workspace groups and Ungrouped', () => {
+  it('hides archived sessions from workspace groups and the default bucket', () => {
     const kept = summary('kept', 1, '/projects/first')
     const gone = summary('gone', 2, '/projects/first')
     const looseGone = summary('loose-gone', 3, '/other')
@@ -482,11 +504,12 @@ describe('deriveGroups', () => {
       sessions, [workspace('first', ['kept', 'gone'])], rowState({ archived: ['gone', 'loose-gone'] }),
       noAttention, view(['first', UNGROUPED_KEY]),
     )
-    // The archived member drops from its group AND the archived stray never
-    // surfaces an Ungrouped bucket; counts follow the visible rows.
-    expect(groups.map(group => group.key)).toEqual(['first'])
+    // The archived member drops from its group; the archived stray does not
+    // appear, but the system default bucket remains (empty).
+    expect(groups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY])
     expect(groups[0]!.sessions.map(node => node.id)).toEqual([kept.id])
     expect(groups[0]!.sessionCount).toBe(1)
+    expect(groups[1]!.sessions).toEqual([])
   })
 
   it('leads expanded groups with pinned rows in the supplied order', () => {
@@ -540,6 +563,7 @@ describe('deriveGroups', () => {
     )
     expect(groups.map(group => [group.key, group.sessionCount])).toEqual([
       ['empty', archivedFilter === 'show' ? 1 : 0],
+      [UNGROUPED_KEY, 0],
     ])
   })
 

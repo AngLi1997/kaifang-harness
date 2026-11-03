@@ -291,7 +291,7 @@ describe('WorkspaceBrowser', () => {
         }])),
         useHostInfo: selector => selector({ home: '/home/u', isLoopback: true }),
       })
-      fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
+      fireEvent.pointerEnter(screen.getByText('Project').closest('[role="treeitem"]')?.parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(800) })
       expect(screen.getByText('~/Documents/project')).toBeTruthy()
     } finally {
@@ -410,7 +410,12 @@ describe('WorkspaceBrowser', () => {
     })
 
     rerender(b, { wide: true })
-    expect(screen.getAllByRole('treeitem').slice(1).map(row => row.textContent)).toEqual([
+    expect(
+      screen.getAllByRole('treeitem')
+        .slice(1)
+        .map(row => row.textContent)
+        .filter(text => text !== '默认工作区'),
+    ).toEqual([
       expect.stringContaining('blank'),
       expect.stringContaining('old'),
     ])
@@ -811,8 +816,11 @@ describe('WorkspaceBrowser', () => {
         running: false, pendingInteraction: undefined, completionUnread: false, ...value,
       }]]))
     const expectVisible = (count: number) => {
-      expect(screen.getAllByRole('treeitem').map(row => within(row).getByText(/^(alpha|session-\d+)$/u).textContent))
-        .toEqual(['alpha', ...items.slice(0, count).map(item => item.displayTitle)])
+      expect(
+        screen.getAllByRole('treeitem')
+          .filter(row => row.getAttribute('data-row-key') !== 'workspace:')
+          .map(row => within(row).getByText(/^(alpha|session-\d+)$/u).textContent),
+      ).toEqual(['alpha', ...items.slice(0, count).map(item => item.displayTitle)])
     }
     fireEvent.click(screen.getByText('alpha'))
     expectVisible(5)
@@ -930,7 +938,9 @@ describe('WorkspaceBrowser', () => {
       for (const [index, item] of ordinary.entries()) {
         expect(screen.queryByText(item.displayTitle) !== null).toBe(index < count)
       }
-      expect(screen.getAllByRole('treeitem')).toHaveLength(count + 1 + Number(withBlank))
+      expect(
+        screen.getAllByRole('treeitem').filter(row => row.getAttribute('data-row-key') !== 'workspace:'),
+      ).toHaveLength(count + 1 + Number(withBlank))
       expect(screen.queryByText('新会话') !== null).toBe(withBlank)
     }
     expectVisible(5)
@@ -1070,7 +1080,12 @@ describe('WorkspaceBrowser', () => {
       'blank', 'session-1', 'session-2', 'session-3', 'session-4', 'session-5',
       'session-10', 'session-6', 'session-7', 'session-8', 'session-9', 'session-11', 'session-12',
     ])
-    expect(screen.getAllByRole('treeitem').slice(1).map(row => row.querySelector('[class*="title"]')?.textContent)).toEqual([
+    expect(
+      screen.getAllByRole('treeitem')
+        .slice(1)
+        .map(row => row.querySelector('[class*="title"]')?.textContent)
+        .filter(text => text !== '默认工作区'),
+    ).toEqual([
       '新会话', 'session-1', 'session-2', 'session-3', 'session-4', 'session-5',
       'session-10', 'session-6', 'session-7', 'session-8', 'session-9',
     ])
@@ -1318,7 +1333,7 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).toHaveBeenCalledWith(wid('alpha'))
   })
 
-  it('auto-expands the Ungrouped bucket and allows clearing loose Sessions; its ＋ is inert', () => {
+  it('auto-expands the default bucket, offers clear-only (no rename/delete), and keeps ＋ inert', () => {
     const startSession = vi.fn()
     mount({
       useSessions: hook(sessionState([summary('loose', 1)], { main: sid('loose') })),
@@ -1327,10 +1342,23 @@ describe('WorkspaceBrowser', () => {
     })
     // The loose session's group is UNGROUPED_KEY: expanded by the effect.
     expect(screen.getByText('loose')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '工作区“未分组”的操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '工作区“默认工作区”的操作' }))
     expect(screen.getByRole('menuitem', { name: '清空对话' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '在“未分组”中新建会话' }))
+    expect(screen.queryByRole('menuitem', { name: '重命名' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '删除' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '删除工作区' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '在“默认工作区”中新建会话' }))
     expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps the empty default bucket visible with the empty.none copy', () => {
+    mount({
+      useSessions: hook(sessionState([])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', [])])),
+    })
+    expect(screen.getByText('默认工作区')).toBeTruthy()
+    fireEvent.click(screen.getByText('默认工作区'))
+    expect(screen.getByText('暂无会话')).toBeTruthy()
   })
 
   it('keeps an already-expanded group when the selection moves within it', () => {
@@ -1850,6 +1878,9 @@ describe('WorkspaceBrowser', () => {
     vi.useFakeTimers()
     try {
       const b = mount()
+      // Workspace mode always keeps the system default bucket; empty copy lives inside it.
+      expect(screen.getByText('默认工作区')).toBeTruthy()
+      fireEvent.click(screen.getByText('默认工作区'))
       expect(screen.getByText('暂无会话')).toBeTruthy()
       b.store.actions.setGroupBy('flat')
       rerender(b, {})
@@ -2054,7 +2085,12 @@ describe('WorkspaceBrowser', () => {
       )),
     })
     fireEvent.click(screen.getByText('alpha'))
-    expect(screen.getAllByRole('treeitem').slice(1).map(row => row.textContent)).toEqual([
+    expect(
+      screen.getAllByRole('treeitem')
+        .slice(1)
+        .map(row => row.textContent)
+        .filter(text => text !== '默认工作区'),
+    ).toEqual([
       expect.stringContaining('one'), expect.stringContaining('two'),
       expect.stringContaining('three'), expect.stringContaining('four'),
     ])
@@ -2068,7 +2104,12 @@ describe('WorkspaceBrowser', () => {
     fireDrag(one, 'drop', 105)
     fireEvent.dragEnd(two)
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['three', 'two', 'one', 'four'])
-    expect(screen.getAllByRole('treeitem').slice(1).map(row => row.textContent)).toEqual([
+    expect(
+      screen.getAllByRole('treeitem')
+        .slice(1)
+        .map(row => row.textContent)
+        .filter(text => text !== '默认工作区'),
+    ).toEqual([
       expect.stringContaining('two'), expect.stringContaining('one'),
       expect.stringContaining('three'), expect.stringContaining('four'),
     ])
@@ -2198,7 +2239,7 @@ describe('WorkspaceBrowser', () => {
       useSessions: hook(sessions),
       useWorkspaces: hook(workspaceState([])),
     })
-    fireEvent.click(screen.getByText('未分组'))
+    fireEvent.click(screen.getByText('默认工作区'))
 
     const dragAfter = (sourceTitle: string, targetTitle: string): void => {
       const source = screen.getByText(sourceTitle).closest('[role="treeitem"]') as HTMLElement
@@ -2305,28 +2346,31 @@ describe('WorkspaceBrowser', () => {
     expect(b.store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['two', 'one'])
   })
 
-  it('labels an unrenamed default Workspace in the reader’s language and every other title verbatim', () => {
+  it('merges initializeDefault into the clear-only default bucket and labels other titles verbatim', () => {
     const renameWorkspace = vi.fn(async () => {})
     mount({
+      useSessions: hook(sessionState([summary('loose', 1)])),
       useWorkspaces: hook(workspaceState([
         workspace('alpha', [], 'default-workspace'),
         workspace('beta', [], 'default-workspace backup'),
       ])),
       renameWorkspace,
     })
+    expect(screen.getByText('默认工作区')).toBeTruthy()
     expect(screen.getByRole('button', { name: '工作区“默认工作区”的操作' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '工作区“default-workspace backup”的操作' })).toBeTruthy()
-    // The dialog edits the text on screen, and the stored title — not that
-    // text — decides whether confirming saves. So confirming the untouched
-    // prefill pins the localized name and the row stops following the language.
+    // System default bucket: clear only — no rename/delete.
     fireEvent.click(screen.getByRole('button', { name: '工作区“默认工作区”的操作' }))
+    expect(screen.getByRole('menuitem', { name: '清空对话' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '重命名' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: '删除工作区' })).toBeNull()
+    // Non-default titles stay renameable (verbatim, including names that look similar).
+    fireEvent.click(screen.getByRole('button', { name: '工作区“default-workspace backup”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
-    expect(screen.getByLabelText<HTMLInputElement>('工作区名称').value).toBe('默认工作区')
-    expect(screen.queryByRole('alert')).toBeNull()
-    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '重命名' })
-    expect(confirm.disabled).toBe(false)
-    fireEvent.click(confirm)
-    expect(renameWorkspace).toHaveBeenCalledWith(wid('alpha'), '默认工作区')
+    expect(screen.getByLabelText<HTMLInputElement>('工作区名称').value).toBe('default-workspace backup')
+    fireEvent.change(screen.getByLabelText('工作区名称'), { target: { value: 'Backup pinned' } })
+    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
+    expect(renameWorkspace).toHaveBeenCalledWith(wid('beta'), 'Backup pinned')
   })
 
   it('renames a workspace through the row menu dialog', async () => {
@@ -2396,38 +2440,40 @@ describe('WorkspaceBrowser', () => {
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
   })
 
-  it('confirms Workspace deletion, explains retention, and blocks duplicate submission', async () => {
+  it('confirms Workspace deletion with session count and blocks duplicate submission', async () => {
     let resolveDelete!: () => void
     const deleteWorkspace = vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve }))
     const browser = mount({
       useWorkspaces: hook(workspaceState([workspace('alpha', ['session'], 'Alpha')])),
+      useSessions: hook(sessionState([summary('session', 1, { displayTitle: 'Seed' })])),
       deleteWorkspace,
     })
     fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
-    const dialog = screen.getByRole('dialog', { name: '删除工作区' })
-    expect(dialog.textContent).toContain('将把“Alpha”从工作区列表中移除')
-    expect(dialog.textContent).toContain('文件夹与会话记录会保留')
-    expect(dialog.textContent).toContain('其会话将显示在“未分组”下')
+    const dialog = screen.getByRole('dialog', { name: '删除「Alpha」？' })
+    expect(dialog.textContent).toContain('将同时删除其中的 1 个会话')
+    expect(dialog.textContent).not.toContain('将显示在')
+    expect(dialog.textContent).not.toContain('逻辑删除')
+    expect(dialog.textContent).not.toContain('归档')
 
-    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '删除工作区' })
+    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '删除' })
     fireEvent.click(confirm)
     fireEvent.click(confirm)
     expect(deleteWorkspace).toHaveBeenCalledOnce()
     expect(deleteWorkspace).toHaveBeenCalledWith(wid('alpha'))
     expect(confirm.disabled).toBe(true)
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '取消' }).disabled).toBe(true)
-    expect(screen.getByRole('status').textContent).toBe('正在删除工作区…')
+    expect(screen.getByRole('status').textContent).toBe('正在删除…')
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: '删除「Alpha」？' })).toBeTruthy()
     await act(async () => { resolveDelete() })
     // RPC success alone does not close: the component waits until its
     // useWorkspaces projection has committed the removal, preventing a stale
     // Workspace frame from leaking into the next gesture.
-    expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: '删除「Alpha」？' })).toBeTruthy()
     rerender(browser, { useWorkspaces: hook(workspaceState([])) })
-    expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: '删除「Alpha」？' })).toBeNull()
   })
 
   it('keeps the delete dialog open on failure and allows retry or cancellation', async () => {
@@ -2440,13 +2486,13 @@ describe('WorkspaceBrowser', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
-    fireEvent.click(screen.getByRole('button', { name: '删除工作区' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('storage unavailable') })
-    expect(screen.getByRole('dialog', { name: '删除工作区' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '删除工作区' }))
+    expect(screen.getByRole('dialog', { name: '删除「Alpha」？' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: '删除「Alpha」？' })).toBeNull()
   })
 
   it('Cancel, Escape, and Close dismiss deletion without calling the action', () => {
@@ -2466,7 +2512,7 @@ describe('WorkspaceBrowser', () => {
     open()
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
     expect(deleteWorkspace).not.toHaveBeenCalled()
-    expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: '删除「Alpha」？' })).toBeNull()
   })
 
   it('search hides drag affordances (rows are not draggable during search)', () => {
@@ -2634,7 +2680,7 @@ describe('Workspace tree grouping', () => {
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledExactlyOnceWith(root.workspaceId, undefined)
     rerender(b, { useWorkspaces: hook(workspaceState([team, child, other, outside, root])) })
     expect(screen.getAllByRole('treeitem').map(row => row.textContent)).toEqual([
-      'outside', 'Projects', 'Team', 'Child', 'other',
+      'outside', 'Projects', 'Team', 'Child', 'other', '默认工作区',
     ])
     expect(within(section('Team')).getByText('Child')).toBeTruthy()
   })

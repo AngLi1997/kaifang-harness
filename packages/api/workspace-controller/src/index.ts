@@ -161,16 +161,16 @@ export class WorkspaceController extends TypertRemoteService {
   }
 
   /**
-   * Remove one Workspace registration while retaining files and Sessions.
+   * Remove one Workspace registration while retaining files and Session logs.
+   * Accounted Sessions are soft-deleted with the registration (not Ungrouped).
    * @param request - Workspace identity to remove.
-   * @returns deletion confirmation.
+   * @returns deletion confirmation plus the complete soft-delete set.
    */
   @Remote('delete')
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     // Enqueue immediately (ownership runs inside the command queue) so a
     // concurrent rename cannot leapfrog while platformPartition awaits.
-    // Do not require clients to empty sessionIds first — registration drop
-    // ungroups Sessions, matching the Web/Desktop delete-workspace copy.
+    // Soft-delete of accounted Sessions is atomic with the registration drop.
     return this.commands.delete(request, async () => {
       const partition = await this.platformPartition()
       return partition?.ownerId

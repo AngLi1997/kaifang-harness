@@ -88,7 +88,7 @@ describe('Workspace header actions under the page access snapshot', () => {
     const runtime = await bench(access)
     try {
       runtime.renderRoot()
-      const header = await screen.findByRole('treeitem')
+      const header = (await screen.findByText('Project')).closest('[role="treeitem"]') as HTMLElement
       expect(screen.queryByRole('button', { name: '在“Project”中新建会话' })).toBeNull()
       expect(screen.queryByRole('button', { name: '工作区“Project”的操作' })).toBeNull()
       expect(header.getAttribute('draggable')).toBe('false')
@@ -105,7 +105,7 @@ describe('Workspace header actions under the page access snapshot', () => {
       })
       expect(screen.getByRole('button', { name: '在“Project”中新建会话' })).toBeTruthy()
       expect(screen.getByRole('button', { name: '工作区“Project”的操作' })).toBeTruthy()
-      expect(screen.getByRole('treeitem').getAttribute('draggable')).toBe('true')
+      expect((screen.getByText('Project').closest('[role="treeitem"]') as HTMLElement).getAttribute('draggable')).toBe('true')
 
       // The owner's snapshot answers every action.
       act(() => { access.replace({ type: 'baseline', owner: true }) })
@@ -120,12 +120,12 @@ describe('Workspace header actions under the page access snapshot', () => {
     const runtime = await bench(access, { ungroupedSession: 'loose' as SessionId })
     try {
       runtime.renderRoot()
-      await screen.findByText('未分组')
-      expect(screen.queryByRole('button', { name: '在“未分组”中新建会话' })).toBeNull()
+      await screen.findByText('默认工作区')
+      expect(screen.queryByRole('button', { name: '在“默认工作区”中新建会话' })).toBeNull()
       act(() => {
         access.update({ type: 'upsert', grant: { resource: { kind: 'global' }, actions: ['session/create'] } })
       })
-      expect(screen.getByRole('button', { name: '在“未分组”中新建会话' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: '在“默认工作区”中新建会话' })).toBeTruthy()
     } finally {
       await runtime.dispose()
     }

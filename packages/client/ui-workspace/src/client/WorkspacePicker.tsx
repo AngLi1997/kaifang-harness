@@ -16,7 +16,7 @@ import {
 import type {
   WorkspaceId, WorkspaceSnapshot, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
+import { DEFAULT_WORKSPACE_DIRECTORY, workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import { distinguishingPathSuffixes } from './path-suffix.ts'
@@ -111,14 +111,17 @@ export function WorkspacePickFlow({
   const addEntries: MenuEntry[] = flowAvailable
     ? [{ id: ADD_WORKSPACE, label: t('menu.addWorkspace'), icon: <IconPlusOutlineRegular size={16} />, disabled: flowBusy }]
     : []
-  const unassignedEntries: MenuEntry[] = allowUnassigned
+  const defaultWorkspaceName = t('workspace.defaultName')
+  const defaultWorkspace = workspaces.find(workspace => workspace.title === DEFAULT_WORKSPACE_DIRECTORY)
+  // When initializeDefault already lists the default Workspace, its row is the
+  // one "Default workspace" entry — do not also offer the unassigned sentinel.
+  const unassignedEntries: MenuEntry[] = allowUnassigned && defaultWorkspace === undefined
     ? [{ id: NO_WORKSPACE, label: t('menu.noWorkspace'), disabled: flowBusy }]
     : []
   // With workspaces listed, no-Workspace and Add stay below the scrolling list.
   const pinFooter = !addOnly && workspaces.length > 0
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
-  const defaultWorkspaceName = t('workspace.defaultName')
   const listed = useMemo(() => {
     if (!pinFooter) return []
     const rows = workspaces.map(workspace => ({
@@ -223,7 +226,7 @@ export function WorkspacePickFlow({
 
   const handleSelect = (id: string): void => {
     if (id === NO_WORKSPACE) {
-      onPick(null)
+      onPick(defaultWorkspace?.workspaceId ?? null)
       return
     }
     if (id === ADD_WORKSPACE) {
@@ -240,7 +243,9 @@ export function WorkspacePickFlow({
         anchor={null}
         items={items}
         {...footer === undefined ? {} : { footer }}
-        selectedId={selectedId === null ? NO_WORKSPACE : selectedId}
+        selectedId={selectedId === null
+          ? (defaultWorkspace?.workspaceId ?? NO_WORKSPACE)
+          : selectedId}
         onSelect={handleSelect}
         onClose={onClose}
         side={side}

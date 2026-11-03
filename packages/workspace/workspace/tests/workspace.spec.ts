@@ -524,7 +524,7 @@ describe('WorkspaceRegistry create and lookup', () => {
     })
   })
 
-  it('deletes only the registration and leaves its directory and session headers untouched', async () => {
+  it('deletes the registration, soft-deletes accounted Sessions, and leaves directory and logs untouched', async () => {
     const dir = await makeDir('delete-registration')
     const result = await harness({ sessions: [header('kept-session', dir)] })
     const workspace = await result.registry.create(dir)
@@ -534,12 +534,13 @@ describe('WorkspaceRegistry create and lookup', () => {
     await expect(result.registry.delete(workspace.id)).resolves.toBe(false)
     expect(result.registry.get(workspace.id)).toBeUndefined()
     expect(result.registry.list()).toEqual([])
+    expect([...result.registry.deletedSessionIds]).toEqual([SessionId('kept-session')])
     expect(storedState(result.pool)).toEqual({
       initialized: true,
       workspaceIds: [],
       archivedSessionIds: [],
       pinnedSessionIds: [],
-      deletedSessionIds: [],
+      deletedSessionIds: [SessionId('kept-session')],
     })
     expect(result.pool.media.get('workspace')!.tables.get('workspaces')!.has(workspace.id)).toBe(false)
     await expect(realpath(dir)).resolves.toBe(dir)
@@ -551,6 +552,8 @@ describe('WorkspaceRegistry create and lookup', () => {
     expect(reregistered.id).not.toBe(workspace.id)
     expect(reregistered.path).toBe(dir)
     expect(reregistered.sessionIds).toEqual([])
+    // Soft-deleted Sessions stay hidden and are not re-adopted by path.
+    expect([...result.registry.deletedSessionIds]).toEqual([SessionId('kept-session')])
   })
 
   it('rolls registry order and cache back when record deletion fails', async () => {

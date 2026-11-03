@@ -584,7 +584,7 @@ describe('ConversationRoot resident composer', () => {
     expect(b.store.store.getSnapshot().draft).toEqual({ text: 'draft in hero', references: [] })
     // Picker: open through the chip; a pick switches to the other
     // workspace's blank session (draft carry is apply-layer wiring).
-    fireEvent.click(b.view.getByRole('button', { name: '选择工作区' }))
+    fireEvent.click(b.view.getByRole('button', { name: 'one' }))
     const owner = b.pickerOwner() as { open: boolean; onPick(id: WorkspaceId): void }
     expect(owner.open).toBe(true)
     act(() => { owner.onPick(wid('second')) })
@@ -841,7 +841,7 @@ describe('ConversationRoot resident composer', () => {
       ],
       selectWorkspace,
     )
-    fireEvent.click(b.view.getByRole('button', { name: '选择工作区' }))
+    fireEvent.click(b.view.getByRole('button', { name: 'one' }))
     const owner = b.pickerOwner() as { onPick(id: WorkspaceId): void }
     await act(async () => { owner.onPick(wid('second')); await Promise.resolve() })
     expect(selectWorkspace).toHaveBeenCalledWith(wid('second'))
@@ -849,9 +849,17 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.getByText('one')).toBeTruthy()
   })
 
+
+  it('WorkspaceChip aria-label follows the visible workspace label', () => {
+    const b = mount(sessionSnapshotOf({ blank: true }))
+    const chip = b.view.getByRole('button', { name: 'one' })
+    expect(chip.getAttribute('aria-label')).toBe('one')
+    expect(chip.textContent).toContain('one')
+  })
+
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {
     const b = mount(sessionSnapshotOf({ blank: true }))
-    const chip = b.view.getByRole('button', { name: '选择工作区' })
+    const chip = b.view.getByRole('button', { name: 'one' })
     expect((chip as HTMLButtonElement).disabled).toBe(false)
     expect(b.slotCalls).toContain('conversation.hero.workspace')
     // The agent-preset chip sits in the same row, for the same reason: both

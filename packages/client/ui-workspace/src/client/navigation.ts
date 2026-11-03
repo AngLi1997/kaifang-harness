@@ -99,12 +99,16 @@ export interface UiWorkspace {
    */
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void
   /**
-   * Archive a Session and clear it when it is the current selection.
+   * Archive a Session; when it is the current selection, open another visible
+   * Session or clear to the empty state.
    * @param sessionId - Session to archive.
    * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
-  /** Soft-delete a Session (hide from UI; retain logs). Distinct from archive. */
+  /**
+   * Soft-delete a Session (hide from UI; retain logs). Distinct from archive.
+   * When it is the current selection, open another visible Session or clear.
+   */
   deleteSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
   /**
    * Unarchive a Session, restoring it to its recorded Workspace position.
@@ -405,12 +409,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   async archiveSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
     await this.workspaces.archiveSession(sessionId, options)
-    if (this.mainReference?.sessionId === sessionId) this.clearMain()
+    this.reselectAfterHiding(sessionId)
   }
 
   async deleteSession(sessionId: SessionId, options: { readonly stopActivity?: boolean } = {}): Promise<void> {
     await this.workspaces.deleteSession(sessionId, options)
-    if (this.mainReference?.sessionId === sessionId) this.clearMain()
+    this.reselectAfterHiding(sessionId)
   }
 
   async unarchiveSession(sessionId: SessionId): Promise<void> {
@@ -461,7 +465,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
-      if (this.clearArchivedCurrent()) return
+      if (this.leaveHiddenCurrent()) return
       if (initial !== 'waiting' || this.restorationNavigation?.aborted === true) return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
@@ -532,13 +536,47 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }
   }
 
-  /** @returns true when an archived current selection was cleared. */
-  private clearArchivedCurrent(): boolean {
+  /**
+   * When the primary Session is archived or soft-deleted (including via Workspace
+   * delete), move to another visible Session or clear to the empty state.
+   * @returns true when the primary selection was adjusted.
+   */
+  private leaveHiddenCurrent(): boolean {
     const current = this.mainReference?.sessionId
-    if (current === undefined
-      || !this.workspaces.list.getSnapshot().archivedSessionIds.includes(current)) return false
-    this.clearMain()
+    if (current === undefined) return false
+    const snap = this.workspaces.list.getSnapshot()
+    const hidden = snap.archivedSessionIds.includes(current) || snap.deletedSessionIds.includes(current)
+    if (!hidden) return false
+    this.reselectAfterHiding(current)
     return true
+  }
+
+  /** Prefer another visible non-blank Session; otherwise a blank; otherwise empty. */
+  private reselectAfterHiding(hiddenId: SessionId): void {
+    if (this.mainReference?.sessionId !== hiddenId) return
+    const next = this.pickNextVisibleSession(hiddenId)
+    if (next !== undefined) this.replaceMain(next, this.lifetime.signal, 'reveal')
+    else this.clearMain()
+  }
+
+  private pickNextVisibleSession(excludeId: SessionId): SessionId | undefined {
+    const workspaces = this.workspaces.list.getSnapshot()
+    const sessions = this.sessions.list.getSnapshot()
+    const archived = new Set(workspaces.archivedSessionIds)
+    const deleted = new Set(workspaces.deletedSessionIds)
+    let blank: SessionId | undefined
+    for (const id of sessions.ids) {
+      if (id === excludeId) continue
+      const summary = sessions.byId[id]
+      if (summary === undefined || summary.origin === 'subagent') continue
+      if (deleted.has(id) || archived.has(id)) continue
+      if (summary.blank) {
+        blank ??= id
+        continue
+      }
+      return id
+    }
+    return blank
   }
 
   private clearMain(): void {

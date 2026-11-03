@@ -132,12 +132,17 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
 
   /**
    * Delete a Workspace and remove it from the local projection immediately.
+   * Soft-deleted member Sessions from the unary echo are installed at once so
+   * they cannot briefly appear under Ungrouped while follow catches up.
    * @param workspaceId - target Workspace.
    * @returns generated Remote result.
    */
   async delete(workspaceId: WorkspaceId): Promise<RemoteResult<WorkspaceDeleteValue>> {
     const result = await this.remote.delete({ workspaceId })
-    if (result.ok) this.remove(workspaceId, true)
+    if (result.ok) {
+      this.remove(workspaceId, true)
+      this.installDeleted(result.value.deletedSessionIds)
+    }
     return result
   }
 

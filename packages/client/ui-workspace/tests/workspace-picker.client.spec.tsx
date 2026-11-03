@@ -132,7 +132,7 @@ describe('WorkspacePicker', () => {
       workspace('gamma', 'Alone'),
     ])
     expect(screen.getAllByRole('menuitem').map(entry => entry.textContent))
-      .toEqual(['Shared one/a/Shared', 'Shared two/a/Shared', 'Alone', '不在任何工作区中工作', '添加工作区…'])
+      .toEqual(['Shared one/a/Shared', 'Shared two/a/Shared', 'Alone', '默认工作区', '添加工作区…'])
     // The full path stays reachable when a narrow menu truncates the row.
     expect(screen.getByText('two/a/Shared').parentElement?.title).toBe('/two/a/Shared')
     expect(screen.getByRole('menuitem', { name: 'Alone' }).querySelector('[title]')).toBeNull()
@@ -157,7 +157,7 @@ describe('WorkspacePicker', () => {
 
   it('keeps the no-workspace choice beside Add when no Workspaces are listed', () => {
     const b = mount([])
-    expect(screen.getByRole('menuitem', { name: '不在任何工作区中工作' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '默认工作区' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '添加工作区…' })).toBeTruthy()
     expect(screen.queryByTestId('directory-flow')).toBeNull()
     chooseAdd()
@@ -265,7 +265,7 @@ describe('WorkspacePicker', () => {
 
   it('offers no-workspace selection without a directory flow', () => {
     const b = mount([], vi.fn(), occupancySource(false))
-    expect(screen.getByRole('menuitem', { name: '不在任何工作区中工作' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '默认工作区' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: '添加工作区…' })).toBeNull()
     expect(screen.queryByTestId('directory-flow')).toBeNull()
     expect(b.createWorkspace).not.toHaveBeenCalled()

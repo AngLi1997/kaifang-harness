@@ -629,3 +629,9 @@
     transition: none;
   }
 }
+
+.groupEmpty {
+  padding: 8px 12px 8px calc(12px + var(--dsh-workspace-indent, 0px));
+  color: var(--dsh-color-text-tertiary, #8b8b8b);
+  font-size: 12px;
+}

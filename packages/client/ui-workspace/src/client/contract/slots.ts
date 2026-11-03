@@ -279,7 +279,10 @@ export type WorkspaceBrowserInjected = {
   notifyArchivedNotOpenable: () => void
   /** Rename a Host Workspace (rejects on name conflict; resolves on durability). */
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
-  /** Delete only a Host Workspace registration; directory and Session logs remain. */
+  /**
+   * Delete a Host Workspace registration and soft-delete its Sessions (Host-atomic).
+   * Directory and Session logs remain on disk; members do not move to the default bucket.
+   */
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /**
    * Reorder a Workspace in the durable registry display order.

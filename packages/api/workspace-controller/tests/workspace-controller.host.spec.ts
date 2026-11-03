@@ -226,7 +226,7 @@ describe('WorkspaceController commands', () => {
     })
     gate.resolve(undefined)
     await blocker
-    await expect(deletion).resolves.toEqual({ deleted: true })
+    await expect(deletion).resolves.toEqual({ deleted: true, deletedSessionIds: [] })
     await expect(staleRename).rejects.toMatchObject({ code: 'workspace/not-found' })
   })
 
@@ -498,6 +498,9 @@ describe('WorkspaceController follow', () => {
     await expect(nextFrame(iterator)).resolves.toEqual({ type: 'order', workspaceIds: [shownId] })
     await controller.delete({ workspaceId: shownId })
     await expect(nextFrame(iterator)).resolves.toEqual({ type: 'order', workspaceIds: [] })
+    // Soft-delete of accounted Sessions clears archive membership and publishes deleted.
+    await expect(nextFrame(iterator)).resolves.toEqual({ type: 'archived', archivedSessionIds: [] })
+    await expect(nextFrame(iterator)).resolves.toEqual({ type: 'deleted', deletedSessionIds: [shared.id] })
     await expect(nextFrame(iterator)).resolves.toEqual({ type: 'remove', workspaceId: shownId })
 
     abort.abort()
