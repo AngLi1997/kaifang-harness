@@ -557,6 +557,8 @@ class PlatformSession {
 }
 
 function checkTrusted(connection: Context['connection'], req: IncomingMessage, res: ServerResponse): boolean {
+  // Desktop profile does not require platform trust checks for its internal Host/API requests.
+  if (process.env.ELECTRON_RUN_AS_NODE === '1') return true
   if (connection.trustRejection === undefined) {
     writeText(res, 403, 'forbidden')
     return false
