@@ -242,7 +242,7 @@ function mount(
           useSessionRetainInfo={() => undefined}
           useWorkspaces={props.useWorkspaces}
           {...allowAllAccess}
-          useProjection={(key => key === 'title' ? options.projectedTitle : undefined) as never}
+          useProjection={((key: string) => key === 'title' ? options.projectedTitle : undefined) as never}
           useInput={useInput}
           inputActions={inputActions}
           useStore={bindSnapshotSelector(store)}

@@ -1,8 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { expect, it } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SessionBinding } from '../src/client/contract/sessions.ts'
-import { ClientSessions } from '../src/client/sessions/service.ts'
+import { ClientSessions, type SessionBinding } from '../src/client/sessions/service.ts'
 
 it('answers binding and scope from another catalog when this one has no generation', async () => {
   const ctx = new Context()
