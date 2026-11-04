@@ -20,7 +20,9 @@ describe('kaifang user identity', () => {
     expect(isKaifangUserPrincipal(browser)).toBe(true)
     expect(isDeviceAdmittedKaifangUser(browser)).toBe(false)
     expect(isDeviceAdmittedKaifangUser(device)).toBe(true)
-    expect(isDeviceAdmittedKaifangUser({ ...browser, admission: undefined })).toBe(false)
+    expect(isDeviceAdmittedKaifangUser({
+      kind: 'kaifang-user', sub: 'sub', tid: 'tid', clientId: 'kaifang-harness',
+    })).toBe(false)
     expect(platformUserKey(browser)).toHaveLength(24)
   })
 })
