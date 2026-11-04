@@ -113,7 +113,12 @@ export function apply(ctx: ClientContext): void {
   const views = new SidebarSessionViews(ctx.sessions)
   ctx.effect(() => {
     const current = ctx.uiSession.adapter.current
-    const sync = (): void => { views.select(current.getSnapshot().key as SessionId | undefined) }
+    const sync = (): void => {
+      const key = current.getSnapshot().key as SessionId | undefined
+      // Cloud sessions are adopted into this binding without joining the local catalog.
+      const known = key !== undefined && ctx.sessions.list.getSnapshot().byId[key] !== undefined
+      views.select(known ? key : undefined)
+    }
     const unsubscribe = current.subscribe(sync)
     sync()
     return () => { unsubscribe(); views.dispose() }

@@ -12,6 +12,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from '../src/client/contract/slots.ts'
 import { WorkspacePicker } from '../src/client/WorkspacePicker.tsx'
+import { dualPlaneStore } from '../src/client/host-planes/store.ts'
 import { zh } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -138,6 +139,56 @@ describe('WorkspacePicker', () => {
     expect(screen.getByRole('menuitem', { name: 'Alone' }).querySelector('[title]')).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Shared two/a/Shared' }))
     expect(b.onPick).toHaveBeenCalledWith(wid('beta'))
+  })
+
+  it('splits planes when the local list is only the unassigned default', async () => {
+    const previous = dualPlaneStore.getSnapshot()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    dualPlaneStore.set({
+      ...previous,
+      cloudOnline: true,
+      activePlane: 'local',
+      sessionPlane: 'local',
+      sidecarWorkspaces: [{ workspaceId: wid('cloud-default'), title: 'default-workspace' }],
+    })
+    try {
+      const b = mount([])
+      expect(screen.getByText('本机')).toBeTruthy()
+      expect(screen.getByText('云端')).toBeTruthy()
+      const rows = screen.getAllByRole('menuitem').filter(item => item.textContent === '默认工作区')
+      expect(rows).toHaveLength(2)
+      fireEvent.click(rows[1]!)
+      await waitFor(() => { expect(errors).toHaveBeenCalled() })
+      expect(b.onPick).not.toHaveBeenCalled()
+    } finally {
+      errors.mockRestore()
+      dualPlaneStore.set(previous)
+    }
+  })
+
+  it('labels cloud and local workspaces separately and localizes the default name', async () => {
+    const previous = dualPlaneStore.getSnapshot()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    dualPlaneStore.set({
+      ...previous,
+      cloudOnline: true,
+      activePlane: 'local',
+      sessionPlane: 'local',
+      sidecarWorkspaces: [{ workspaceId: wid('cloud-default'), title: 'default-workspace' }],
+    })
+    try {
+      const b = mount([{ ...workspace('local-default', 'default-workspace'), path: '/local/default-workspace' }])
+      expect(screen.getByText('本机')).toBeTruthy()
+      expect(screen.getByText('云端')).toBeTruthy()
+      const rows = screen.getAllByRole('menuitem').filter(item => item.textContent === '默认工作区')
+      expect(rows).toHaveLength(2)
+      fireEvent.click(rows[1]!)
+      await waitFor(() => { expect(errors).toHaveBeenCalled() })
+      expect(b.onPick).not.toHaveBeenCalled()
+    } finally {
+      errors.mockRestore()
+      dualPlaneStore.set(previous)
+    }
   })
 
   it('opens the composed directory flow, adopts its picked path, and selects the returned Workspace', async () => {

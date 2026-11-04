@@ -1,7 +1,7 @@
-/** Unary RPC against the inactive Host via the Desktop sidecar path prefix. */
+/** Group cloud-catalog rows for the sidebar. */
 
 import { DEFAULT_WORKSPACE_DIRECTORY, workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
-import type { SidecarGroup, SidecarModelGroup, SidecarSessionRow, SidecarWorkspaceRow } from './types.ts'
+import type { SidecarGroup, SidecarSessionRow, SidecarWorkspaceRow } from './types.ts'
 
 interface WorkspaceBaselineWire {
   readonly items?: readonly {
@@ -25,50 +25,6 @@ interface SessionListWire {
       }
     }
   }[]
-}
-
-interface ModelCatalogWire {
-  readonly groups?: readonly {
-    readonly id?: string
-    readonly name?: string
-    readonly models?: readonly { readonly id?: string; readonly name?: string }[]
-  }[]
-}
-
-interface ClientRequest {
-  readonly type: 'client-request'
-  readonly rpcId: string
-  readonly method: string
-  readonly payload: unknown
-}
-
-async function sidecarCall(
-  prefix: string,
-  method: string,
-  payload: unknown,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  const base = prefix.replace(/\/$/, '')
-  const rpcId = globalThis.crypto?.randomUUID?.() ?? `sidecar-${Date.now()}`
-  const message: ClientRequest = { type: 'client-request', rpcId, method, payload: { args: payload } }
-  const response = await globalThis.fetch(`${base}/api/${method}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(message),
-    ...signal === undefined ? {} : { signal },
-  })
-  if (!response.ok) {
-    throw new Error(`sidecar ${method}: HTTP ${response.status}`)
-  }
-  const body: unknown = await response.json()
-  if (typeof body !== 'object' || body === null || !('result' in body)) {
-    throw new Error(`sidecar ${method}: invalid envelope`)
-  }
-  const result = (body as { result: { ok?: boolean; value?: unknown; error?: { code?: string; message?: string } } }).result
-  if (result.ok !== true) {
-    throw new Error(`${result.error?.code ?? 'error'}: ${result.error?.message ?? method}`)
-  }
-  return result.value
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -197,33 +153,4 @@ export function groupSidecarSessions(
     groups.push({ key: 'default', title: defaultWorkspaceName, sessions: ungrouped })
   }
   return groups
-}
-
-export async function fetchSidecarPlane(
-  prefix: string,
-  signal?: AbortSignal,
-): Promise<{ workspaces: SidecarWorkspaceRow[]; sessions: SidecarSessionRow[]; modelGroups: SidecarModelGroup[] }> {
-  const baseline = await sidecarCall(prefix, 'workspace/listSnapshot', {}, signal) as WorkspaceBaselineWire
-  let listed: SessionListWire | undefined
-  try {
-    listed = await sidecarCall(prefix, 'session/list', { _request: {} }, signal) as SessionListWire
-  } catch {
-    listed = undefined
-  }
-  const { workspaces, sessions } = readSidecarSnapshot(baseline, listed)
-  let modelGroups: SidecarModelGroup[] = []
-  try {
-    const catalog = await sidecarCall(prefix, 'session/modelCatalog', {}, signal) as ModelCatalogWire
-    modelGroups = (catalog.groups ?? []).flatMap((group) => {
-      if (typeof group.id !== 'string') return []
-      const models = (group.models ?? []).flatMap((model) => {
-        if (typeof model.id !== 'string') return []
-        return [{ id: model.id, name: model.name ?? model.id }]
-      })
-      return [{ id: group.id, name: group.name ?? group.id, models }]
-    })
-  } catch {
-    modelGroups = []
-  }
-  return { workspaces, sessions, modelGroups }
 }

@@ -434,6 +434,18 @@ export class UiSession extends Service {
     return (interaction, delegate) => domain.publish(interaction, delegate)
   }
 
+  /** Session shown in place of this catalog's main view. */
+  private adopted: SessionBinding | undefined
+
+  /**
+   * Show a Session binding from another Host catalog.
+   * @param binding - binding to show, or undefined to follow this catalog's main view.
+   */
+  adopt(binding: SessionBinding | undefined): void {
+    this.adopted = binding
+    this.publishMain()
+  }
+
   private rebuildBindings(): void {
     const absent = this.materializeAbsent()
     const updates = [...this.bindings.values].map(record => ({
@@ -459,6 +471,18 @@ export class UiSession extends Service {
 
   private publishMain(): void {
     if (!this.active) return
+    // A released cloud generation must not be materialized again on its dispose.
+    if (this.adopted !== undefined && this.sessions.binding(this.adopted.sessionId) !== this.adopted) {
+      this.adopted = undefined
+    }
+    if (this.adopted !== undefined) {
+      this.watchMainRetention(undefined)
+      const value = this.sourceFor(this.adopted).value
+      if (this.current.value === value) return
+      this.current.value = value
+      notifySubscribers(this.current.listeners, '[ui-session] main binding')
+      return
+    }
     const byId = this.sessions.list.getSnapshot().byId
     const currentId = this.current.value.key as SessionId | undefined
     const currentIsMain = currentId !== undefined

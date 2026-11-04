@@ -97,7 +97,7 @@ describe('attachSharedHostRemoteClient', () => {
           scopes: session.scopes,
         },
       })
-      // Cold-start boot must advertise Remote Client transport for this attach.
+      // desktopBootTransport echoes the Host the caller selects. Dual-plane boot keeps the shell local.
       expect(desktopBootTransport({
         ownsHost: false,
         activeHostUrl: result.ok ? result.hostUrl : 'http://127.0.0.1:9/',

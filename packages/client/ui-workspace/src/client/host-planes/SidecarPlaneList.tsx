@@ -1,4 +1,4 @@
-/** Inactive-plane workspaces, drawn with the same folder and session rows as the live tree. */
+/** Cloud workspaces fed by that Host's follow stream. */
 
 import { useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
@@ -33,7 +33,7 @@ interface SidecarPlaneListProps {
   defaultWorkspaceName: string
   /** Workspace dictionary, including relative-time labels. */
   t: Translate
-  /** Opens the session after that Host's catalog lists it. */
+  /** Opens the session on that Host. */
   onOpenSession: (sessionId: SessionId) => void
   /** Case-insensitive title filter. Empty shows the full snapshot. */
   query?: string
@@ -42,7 +42,7 @@ interface SidecarPlaneListProps {
 }
 
 /**
- * Folder rows for the inactive Host.
+ * Folder rows for the cloud Host.
  * @param props - inactive-plane list inputs.
  * @returns the folder list, or the empty copy.
  */

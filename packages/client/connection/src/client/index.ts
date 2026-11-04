@@ -17,6 +17,8 @@ import { openConnectionWebSocket, type ConnectionWebSocket, type ConnectionWebSo
 
 export type { ConnectionInteractions } from '../connect-protocol.ts'
 export type { ConnectionWebSocket, ConnectionWebSocketFactory } from './socket.ts'
+export { openConnectionWebSocket } from './socket.ts'
+export { createWebConnectionRpc } from './rpc.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {

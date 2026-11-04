@@ -9,6 +9,8 @@ interface TransportGlobal {
     cloudOnline?: boolean
     activePlane?: HostPlaneId
     sidecarApiPrefix?: string | undefined
+    cloudStreamBaseUrl?: string | undefined
+    cloudAccountKey?: string | undefined
   }
   dshDesktop?: {
     hostPlane?: {
@@ -38,6 +40,8 @@ export function readHostPlaneTransport(): HostPlaneTransport | undefined {
     streamBaseUrl: transport.streamBaseUrl,
     ownsHost: transport.ownsHost !== false,
     ...transport.sidecarApiPrefix === undefined ? {} : { sidecarApiPrefix: transport.sidecarApiPrefix },
+    ...transport.cloudStreamBaseUrl === undefined ? {} : { cloudStreamBaseUrl: transport.cloudStreamBaseUrl },
+    ...transport.cloudAccountKey === undefined ? {} : { cloudAccountKey: transport.cloudAccountKey },
   }
 }
 
@@ -50,7 +54,9 @@ export function applyHostPlaneTransport(view: HostPlaneTransport): void {
     streamBaseUrl: view.streamBaseUrl,
     cloudOnline: view.cloudOnline,
     activePlane: view.activePlane,
-    ...view.sidecarApiPrefix === undefined ? { sidecarApiPrefix: undefined } : { sidecarApiPrefix: view.sidecarApiPrefix },
+    sidecarApiPrefix: view.sidecarApiPrefix,
+    cloudStreamBaseUrl: view.cloudOnline ? view.cloudStreamBaseUrl : undefined,
+    cloudAccountKey: view.cloudOnline ? view.cloudAccountKey : undefined,
   }
 }
 

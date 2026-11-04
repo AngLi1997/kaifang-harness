@@ -2,7 +2,7 @@
 
 export type HostPlaneId = 'local' | 'cloud'
 
-/** Path prefix the renderer uses for the inactive Host's unary RPCs. */
+/** Path prefix the renderer uses for the cloud Host's unary RPCs. */
 export const DSH_SIDECAR_API_PREFIX = '/__dsh_sidecar__'
 
 export function isSidecarApiPath(pathname: string): boolean {
@@ -24,23 +24,21 @@ export interface DesktopHostEndpoints {
   readonly cloudCookie: string
 }
 
-/** Resolve which Host answers the active shell vs the dual-plane sidecar. */
+/**
+ * Keep the shell on the embedded Host and the sidecar prefix on the cloud Host.
+ * The focused section does not swap these endpoints.
+ * @param endpoints - both Hosts while the cloud endpoint exists.
+ * @returns shell and cloud endpoints.
+ */
 export function resolvePlaneHosts(
-  plane: HostPlaneId,
   endpoints: DesktopHostEndpoints,
 ): {
   readonly active: { readonly hostUrl: string; readonly hostCookie: string }
   readonly sidecar: { readonly hostUrl: string; readonly hostCookie: string }
 } {
-  if (plane === 'local') {
-    return {
-      active: { hostUrl: endpoints.localUrl, hostCookie: endpoints.localCookie },
-      sidecar: { hostUrl: endpoints.cloudUrl, hostCookie: endpoints.cloudCookie },
-    }
-  }
   return {
-    active: { hostUrl: endpoints.cloudUrl, hostCookie: endpoints.cloudCookie },
-    sidecar: { hostUrl: endpoints.localUrl, hostCookie: endpoints.localCookie },
+    active: { hostUrl: endpoints.localUrl, hostCookie: endpoints.localCookie },
+    sidecar: { hostUrl: endpoints.cloudUrl, hostCookie: endpoints.cloudCookie },
   }
 }
 
@@ -48,20 +46,34 @@ export function resolvePlaneHosts(
 export function desktopDualPlaneBoot(options: {
   readonly cloudOnline: boolean
   readonly activePlane: HostPlaneId
+  /** Embedded Host the shell WebSocket stays on. */
   readonly activeHostUrl: string
+  /** Shared Host origin while that endpoint exists. */
+  readonly cloudHostUrl?: string
+  /** Account key for the stored platform user. The main process computes it. */
+  readonly cloudAccountKey?: string
 }): {
   readonly streamBaseUrl: string
   readonly ownsHost: boolean
   readonly cloudOnline: boolean
   readonly activePlane: HostPlaneId
   readonly sidecarApiPrefix: string | undefined
+  readonly cloudStreamBaseUrl?: string
+  readonly cloudAccountKey?: string
 } {
+  const cloudStreamBaseUrl = options.cloudOnline && options.cloudHostUrl !== undefined
+    ? new URL(options.cloudHostUrl).origin
+    : undefined
   return {
     streamBaseUrl: new URL(options.activeHostUrl).origin,
-    // Local plane on Desktop is the owned Host peer world; cloud is Remote Client.
-    ownsHost: !options.cloudOnline || options.activePlane === 'local',
+    // The shell stays on the embedded Host. The cloud section uses its own socket.
+    ownsHost: true,
     cloudOnline: options.cloudOnline,
     activePlane: options.activePlane,
     sidecarApiPrefix: options.cloudOnline ? DSH_SIDECAR_API_PREFIX : undefined,
+    ...cloudStreamBaseUrl === undefined ? {} : { cloudStreamBaseUrl },
+    ...options.cloudOnline && options.cloudAccountKey !== undefined
+      ? { cloudAccountKey: options.cloudAccountKey }
+      : {},
   }
 }

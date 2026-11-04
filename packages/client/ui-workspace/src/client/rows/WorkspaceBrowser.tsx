@@ -40,7 +40,10 @@ import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
-import { CloudDisconnectToast, dualPlaneStore, setActivePlane, SidecarPlaneList } from '../host-planes/index.ts'
+import {
+  CloudDisconnectToast, dualPlaneStore, focusCloudSession, openCloudWorkspaceSession,
+  releaseCloudFocus, setWorkspaceCreatePlane, SidecarPlaneList, workspaceCreatePlane,
+} from '../host-planes/index.ts'
 import type { HostPlaneId } from '../host-planes/types.ts'
 
 /**
@@ -1030,28 +1033,17 @@ export function WorkspaceBrowser({
     }
     open(sessionId)
   }
-  const listRef = useRef(list)
-  listRef.current = list
-  const archivedRef = useRef(archivedSessionIds)
-  archivedRef.current = archivedSessionIds
-  const sidecarOpenSeq = useRef(0)
   const openSidecarSession = (plane: HostPlaneId, sessionId: SessionId): void => {
-    const seq = ++sidecarOpenSeq.current
-    void (async () => {
-      try {
-        await setActivePlane(plane)
-        if (sidecarOpenSeq.current !== seq) return
-        const listed = await waitForListedSession(sessionId, () => listRef.current)
-        if (sidecarOpenSeq.current !== seq || !listed) return
-        if (archivedRef.current.includes(sessionId)) {
-          notifyArchivedNotOpenable()
-          return
-        }
-        open(sessionId)
-      } catch (error: unknown) {
-        console.error('sidecar session open failed:', error)
-      }
-    })()
+    if (plane === 'cloud') {
+      focusCloudSession(sessionId)
+      return
+    }
+    releaseCloudFocus()
+    if (archivedSessionIds.includes(sessionId)) {
+      notifyArchivedNotOpenable()
+      return
+    }
+    open(sessionId)
   }
   const leaveArchivedOnly = (): void => { actions.setArchivedFilter('default') }
   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
@@ -1411,10 +1403,7 @@ export function WorkspaceBrowser({
   const openAdd = (plane: 'single' | HostPlaneId): void => {
     const target: HostPlaneId = plane === 'single' ? dualPlane.activePlane : plane
     setPickerAnchor(showPlanes ? target : 'single')
-    if (showPlanes && dualPlane.activePlane !== target) {
-      void setActivePlane(target).then(() => { requestAddWorkspace() })
-      return
-    }
+    setWorkspaceCreatePlane(showPlanes ? target : 'local')
     requestAddWorkspace()
   }
   const renderSectionHeader = (plane: 'single' | HostPlaneId, label: string) => {
@@ -1542,6 +1531,12 @@ export function WorkspaceBrowser({
         onPick={(workspaceId) => {
           closeAddWorkspace()
           if (workspaceId === null) return
+          if (workspaceCreatePlane() === 'cloud') {
+            void openCloudWorkspaceSession(workspaceId).catch((error: unknown) => {
+              console.error('cloud session open failed:', error)
+            })
+            return
+          }
           startSession(workspaceId, { clearPreviousDraft: false })
         }}
         onClose={() => { closeAddWorkspace() }}
@@ -1860,28 +1855,4 @@ export function WorkspaceBrowser({
       </Modal>
     </div>
   )
-}
-
-const SIDECAR_OPEN_WAIT_MS = 8_000
-
-/** Poll until the active Host's session catalog contains the id, or the wait expires. */
-function waitForListedSession(
-  sessionId: SessionId,
-  read: () => SessionListState,
-): Promise<boolean> {
-  const started = Date.now()
-  return new Promise((resolve) => {
-    const tick = (): void => {
-      if (read().byId[sessionId] !== undefined) {
-        resolve(true)
-        return
-      }
-      if (Date.now() - started >= SIDECAR_OPEN_WAIT_MS) {
-        resolve(false)
-        return
-      }
-      setTimeout(tick, 50)
-    }
-    tick()
-  })
 }

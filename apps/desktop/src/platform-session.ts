@@ -1,7 +1,18 @@
 /** Persisted Platform IAM session for Desktop native shell sign-in. */
 
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+
+/**
+ * Account key for the cloud runtime. Matches `platformUserKey` in platform-auth:
+ * sha256 of `tid`, a NUL, and `sub`, first 24 hex characters.
+ * @param identity - Platform tenant and subject from the stored session.
+ * @returns opaque account key.
+ */
+export function desktopCloudAccountKey(identity: { readonly tid: string; readonly sub: string }): string {
+  return createHash('sha256').update(`${identity.tid}\0${identity.sub}`).digest('hex').slice(0, 24)
+}
 
 /** Profile returned by IAM userinfo / token claims. */
 export interface PlatformSessionUser {
@@ -106,4 +117,29 @@ export async function writePlatformSession(userData: string, session: PlatformSe
 /** Remove the stored session; an absent file already counts as signed out. */
 export async function clearPlatformSession(userData: string): Promise<void> {
   await rm(path(userData), { force: true })
+}
+
+function cloudHostPath(userData: string): string {
+  return join(userData, 'desktop', 'cloud-host.json')
+}
+
+/**
+ * Remember the signed-in Web Host origin so the Desktop Host can proxy cloud models.
+ * @param userData - Electron userData directory.
+ * @param origin - Web Host origin, without a path.
+ */
+export async function writeCloudHostOrigin(userData: string, origin: string): Promise<void> {
+  const target = cloudHostPath(userData)
+  await mkdir(join(userData, 'desktop'), { recursive: true, mode: 0o700 })
+  const temporary = `${target}.${String(process.pid)}.tmp`
+  await writeFile(temporary, `${JSON.stringify({ origin }, null, 2)}\n`, { mode: 0o600 })
+  await rename(temporary, target)
+}
+
+/**
+ * Forget the Web Host origin. An absent file already counts as signed out.
+ * @param userData - Electron userData directory.
+ */
+export async function clearCloudHostOrigin(userData: string): Promise<void> {
+  await rm(cloudHostPath(userData), { force: true })
 }

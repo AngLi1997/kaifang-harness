@@ -77,7 +77,11 @@ async function boot(shortcuts: Partial<Shortcuts> = {}) {
     catalog: { getSnapshot: () => SHORTCUT_CATALOG, subscribe: () => () => {} }, ...shortcuts } as never)
   ctx.provide('layout', layout as never)
   ctx.provide('resources', resources as never)
-  ctx.provide('sessions', { retain: vi.fn(() => ({ ready: Promise.resolve(), release: vi.fn() })) } as never)
+  const sessions = {
+    retain: vi.fn(() => ({ ready: Promise.resolve(), release: vi.fn() })),
+    list: { getSnapshot: () => ({ byId: { [SESSION]: { id: SESSION } } }) },
+  }
+  ctx.provide('sessions', sessions as never)
   ctx.provide('uiSession', { adapter: { current } } as never)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
@@ -90,7 +94,7 @@ async function boot(shortcuts: Partial<Shortcuts> = {}) {
     if (entry.inject === undefined) throw new Error(`expected ${entry.name} to inject`)
     return entry.inject(SESSION)
   }
-  return { ctx, slots, registered, dictionaries, layout, current, resources, fiber, seat, injectedOf }
+  return { ctx, slots, registered, dictionaries, layout, current, resources, sessions, fiber, seat, injectedOf }
 }
 
 describe('ui-sidebar-right apply', () => {
@@ -147,6 +151,13 @@ describe('ui-sidebar-right apply', () => {
     // Both seats read one store: the button only needs to know whether the panel is expanded.
     expect(seat('rightbar.session').store).toBeDefined()
     expect(seat('conversation.session.header.corner').store).toBe(seat('rightbar.session').store)
+  })
+
+  it('does not retain a cloud session the local catalog does not know', async () => {
+    const { ctx, current, sessions } = await boot()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
+    current.set({ key: 'user-cloud-session' as SessionId })
+    expect(sessions.retain).not.toHaveBeenCalled()
   })
 
   it('names the selected Session as on screen while the Conversation fills the main column', async () => {

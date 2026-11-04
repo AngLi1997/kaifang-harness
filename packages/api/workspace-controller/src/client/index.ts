@@ -8,6 +8,7 @@ import {
 } from '@deepseek-ai/dsh-api-gateway/client'
 import type { WorkspaceFollowFrame, WorkspaceFollowIncrement } from '../types.ts'
 import type { WorkspaceFollowSink } from './model.ts'
+import { startCloudRuntime, type CloudRuntime, type CloudRuntimeOptions } from './cloud-runtime.ts'
 import { ClientWorkspaceModel } from './model.ts'
 import { WorkspaceController } from './service.ts'
 
@@ -30,15 +31,27 @@ export type WorkspaceStateStream = RemoteSnapshotStream<
   WorkspaceFollowIncrement
 >
 
+/** Second Host carrier. The shell `sessions` and `workspaces` services stay on the local connection. */
+export interface CloudHost {
+  /**
+   * Connect one cloud Host without publishing it as the shell services.
+   * @param options - origin, cookie prefix, and catalog sink.
+   * @returns the running generation.
+   */
+  start(options: CloudRuntimeOptions): CloudRuntime
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** React-free Client Workspace state and commands. */
     workspaces: import('./service.ts').IWorkspaces
+    /** Second Host carrier for a signed-in cloud endpoint. */
+    cloudHost: CloudHost
   }
 }
 
 /** Required Client Remote services. */
-export const inject = ['remote', 'remote.workspace']
+export const inject = ['remote', 'remote.workspace', 'typert']
 
 /**
  * Install Client Workspace state, commands, and reconnecting follow control.
@@ -53,6 +66,7 @@ export function apply(ctx: Context): void {
     failed: (error) => { model.handleStreamFailure(error) },
   })
   control.start()
+  ctx.provide('cloudHost', { start: options => startCloudRuntime(ctx, options) })
   ctx.effect(
     () => async () => { await control.dispose() },
     'workspace-controller.client.control',

@@ -1,0 +1,37 @@
+# Bilingual-pair consistency record for 2026-11-04-desktop-dual-host-connections.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-11-04-desktop-dual-host-connections.md
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account:
+  en: bc88a4b2ab7543f9
+  zh: da1158ffc6918d48
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/problem:
+  en: c0a37428e4908577
+  zh: 1e08410fc634a734
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/proposal:
+  en: 5f1a87f2a4fa62a2
+  zh: c0d3159a224f4568
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/proposal/stable-endpoints:
+  en: 8d071b7e79a68989
+  zh: fa3ef8480f2ce93c
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/proposal/one-runtime-per-host:
+  en: 9b60d4e834d2f28c
+  zh: ab3690786309abfb
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/proposal/login-decides-membership:
+  en: 3713682aabb38047
+  zh: 31b13f7e58b50e2f
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/proposal/account-isolation:
+  en: a2b0c226417e7193
+  zh: 736b17964338fa18
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/proposal/implementation-order:
+  en: 4eae744b966e87c9
+  zh: 5f30ab3c3f5450a6
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/alternatives-considered:
+  en: daedb40100d3e36d
+  zh: 04c4c48aa6f13a48
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/acceptance-criteria:
+  en: 18f61f4dcb9ba3f3
+  zh: 316354989ccbb6c4
+/agent-note-keep-both-desktop-hosts-connected-for-the-signed-in-account/risks:
+  en: 6b6026c6f9f4f55a
+  zh: f5f30644fa00c83c

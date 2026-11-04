@@ -11,6 +11,8 @@ interface DesktopBootResult {
   cloudOnline?: boolean
   activePlane?: HostPlaneId
   sidecarApiPrefix?: string
+  cloudStreamBaseUrl?: string
+  cloudAccountKey?: string
 }
 
 interface DesktopBootGlobal {
@@ -32,7 +34,10 @@ try {
   if (desktop !== undefined) {
     const gate = (globalThis as { __DSH_BOOT_READY__?: PromiseWithResolvers<void> }).__DSH_BOOT_READY__
     if (gate === undefined) throw new Error('desktop web: boot readiness is missing')
-    void desktop.ready().then(async ({ injections, streamBaseUrl, ownsHost, cloudOnline, activePlane, sidecarApiPrefix }) => {
+    void desktop.ready().then(async ({
+      injections, streamBaseUrl, ownsHost, cloudOnline, activePlane, sidecarApiPrefix,
+      cloudStreamBaseUrl, cloudAccountKey,
+    }) => {
       const transport = globalThis as {
         __DSH_TRANSPORT__?: {
           ownsHost: boolean
@@ -40,6 +45,8 @@ try {
           cloudOnline?: boolean
           activePlane?: HostPlaneId
           sidecarApiPrefix?: string
+          cloudStreamBaseUrl?: string
+          cloudAccountKey?: string
         }
       }
       transport.__DSH_TRANSPORT__ = {
@@ -48,6 +55,8 @@ try {
         ...cloudOnline === true ? { cloudOnline: true } : {},
         ...activePlane === undefined ? {} : { activePlane },
         ...sidecarApiPrefix === undefined ? {} : { sidecarApiPrefix },
+        ...cloudStreamBaseUrl === undefined ? {} : { cloudStreamBaseUrl },
+        ...cloudAccountKey === undefined ? {} : { cloudAccountKey },
       }
       await applyIndexInjections(injections, src => new Promise<void>((resolve, reject) => {
         const script = document.createElement('script')

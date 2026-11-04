@@ -11,10 +11,24 @@ interface PlatformModel {
   readonly id: string
   readonly name: string
   readonly model_type: 'chat' | 'vision'
+  readonly contextWindow: number
+}
+
+/** Capacity used when the platform catalog does not disclose one. A route with none cannot compact. */
+export const PLATFORM_MODEL_CONTEXT_WINDOW = 131_072
+
+const CONTEXT_FIELDS = ['context_window', 'contextWindow', 'max_model_len', 'max_context_tokens'] as const
+
+function contextWindowOf(model: object): number {
+  for (const key of CONTEXT_FIELDS) {
+    const value = Reflect.get(model, key)
+    if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value
+  }
+  return PLATFORM_MODEL_CONTEXT_WINDOW
 }
 
 interface ModelListReply {
-  readonly data: readonly PlatformModel[]
+  readonly data: readonly unknown[]
 }
 
 interface ToolCallState {
@@ -60,6 +74,7 @@ export class KaifangPlatformModelAdapter extends LlmAdapter {
       id: model.id,
       name: model.name,
       inputModalities: model.model_type === 'vision' ? ['text', 'image'] as const : ['text'] as const,
+      context: { contextWindow: model.contextWindow },
     }
   }
 
@@ -78,9 +93,15 @@ export class KaifangPlatformModelAdapter extends LlmAdapter {
     if (!response.ok) throw new LlmError(`KaifangMeta model listing failed with HTTP ${response.status}`, 'PLATFORM_MODEL_CATALOG', { status: response.status })
     const payload = await response.json() as ModelListReply
     if (!Array.isArray(payload.data)) throw new LlmError('KaifangMeta returned an invalid model catalog', 'PLATFORM_MODEL_CATALOG')
-    const models = payload.data.filter((model): model is PlatformModel => typeof model === 'object' && model !== null
-      && !Array.isArray(model) && typeof model.id === 'string' && /^\d+$/u.test(model.id)
-      && typeof model.name === 'string' && (model.model_type === 'chat' || model.model_type === 'vision'))
+    const models = payload.data.flatMap((model): PlatformModel[] => {
+      if (typeof model !== 'object' || model === null || Array.isArray(model)) return []
+      const id = Reflect.get(model, 'id')
+      const name = Reflect.get(model, 'name')
+      const modelType = Reflect.get(model, 'model_type')
+      if (typeof id !== 'string' || !/^\d+$/u.test(id) || typeof name !== 'string'
+        || (modelType !== 'chat' && modelType !== 'vision')) return []
+      return [{ id, name, model_type: modelType, contextWindow: contextWindowOf(model) }]
+    })
     this.catalog = { expiresAt: Date.now() + 10_000, models }
     return models
   }

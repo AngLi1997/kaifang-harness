@@ -61,7 +61,9 @@ import { registerToasts } from './toast/register.ts'
 import { SessionIdMenuItem } from './session-actions/SessionId.tsx'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
 import { en, ja, es, fr, de, ru, pt, zh, type WorkspaceKey } from './locales.ts'
-import { setDualPlaneReconnect, startDualPlaneRuntime } from './host-planes/index.ts'
+import {
+  cloudSessionBinding, createWorkspaceForPlane, setCloudSessionFocus, setDualPlaneReconnect, startDualPlaneRuntime,
+} from './host-planes/index.ts'
 
 export type { StartSessionOptions, UiWorkspace } from './navigation.ts'
 export type {
@@ -142,7 +144,19 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-workspace: dictionaries')
   ctx.effect(() => {
     setDualPlaneReconnect(() => { connection.reconnect() })
-    return startDualPlaneRuntime()
+    // ui-session is not an inject dependency; the sidebar must not wait for it.
+    setCloudSessionFocus((binding) => {
+      const uiSession = ctx.get('uiSession', false)
+      uiSession?.adopt(binding)
+    })
+    sessions.setExternalBindings?.(id => cloudSessionBinding(id))
+    const stop = startDualPlaneRuntime(ctx)
+    return () => {
+      sessions.setExternalBindings?.(undefined)
+      setCloudSessionFocus(undefined)
+      setDualPlaneReconnect(undefined)
+      stop()
+    }
   }, 'ui-workspace: dual-plane')
   const shortcutControls = createWorkspaceShortcutControls()
 
@@ -304,7 +318,7 @@ export function apply(ctx: Context): void {
       await workspaces.insertBefore(workspaceId, beforeWorkspaceId)
     },
     unarchiveSession: async (sessionId) => { await uiWorkspace.unarchiveSession(sessionId) },
-    createWorkspace: input => workspaces.create(input),
+    createWorkspace: input => createWorkspaceForPlane(input, value => workspaces.create(value)),
     requestSearch: shortcutControls.search,
     requestAddWorkspace: shortcutControls.add,
     closeAddWorkspace: shortcutControls.closeAdd,
@@ -315,7 +329,7 @@ export function apply(ctx: Context): void {
     hooks: { directoryFlow: browserFlowSource, hostInfo, workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
-    createWorkspace: input => workspaces.create(input),
+    createWorkspace: input => createWorkspaceForPlane(input, value => workspaces.create(value)),
     hooks: { directoryFlow: pickerFlowSource },
   })
   // Each registration declares its owned children in the same call; slot

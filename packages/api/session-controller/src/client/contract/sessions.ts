@@ -165,4 +165,10 @@ export interface ISessions {
    * @returns the live binding, or undefined without a retained generation.
    */
   binding(id: SessionId): SessionBinding | undefined
+  /**
+   * Read live bindings retained by another Host catalog.
+   * This catalog's own scopes stay authoritative.
+   * @param lookup - foreign bindings, or undefined to stop reading them.
+   */
+  setExternalBindings?(lookup: ((id: SessionId) => SessionBinding | undefined) | undefined): void
 }

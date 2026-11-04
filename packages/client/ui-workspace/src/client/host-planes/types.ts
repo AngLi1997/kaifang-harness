@@ -8,6 +8,10 @@ export interface HostPlaneTransport {
   readonly streamBaseUrl: string
   readonly ownsHost: boolean
   readonly sidecarApiPrefix?: string
+  /** Cloud Host origin. Absent while that endpoint is absent. */
+  readonly cloudStreamBaseUrl?: string
+  /** Account key of the cloud endpoint. A new key clears that endpoint's snapshots first. */
+  readonly cloudAccountKey?: string
 }
 
 export interface SidecarSessionRow {
@@ -41,7 +45,11 @@ export interface DualPlaneSnapshot {
   /** True after cloud disconnect while the empty 云端 shell remains visible. */
   readonly cloudShellEmpty: boolean
   readonly activePlane: HostPlaneId
+  /** Conversation plane. Clicks change this. They do not change `activePlane`. */
+  readonly sessionPlane: HostPlaneId
   readonly sidecarApiPrefix: string | undefined
+  readonly cloudStreamBaseUrl: string | undefined
+  readonly cloudAccountKey: string | undefined
   readonly sidecarWorkspaces: readonly SidecarWorkspaceRow[]
   readonly sidecarSessions: readonly SidecarSessionRow[]
   readonly sidecarModelGroups: readonly SidecarModelGroup[]

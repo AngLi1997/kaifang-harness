@@ -252,38 +252,55 @@ export class ClientSessions implements ISessions {
   private readonly retainObservers = new Map<SessionId, RetentionObserver>()
   private readonly scopeDrops = new Set<Promise<void>>()
   private closed = false
+  private disposeProjection: (() => void) | undefined
+  private disposal: Promise<void> | undefined
 
   /**
    * @param ctx - client root context (scope fibers mount under it).
    * @param remote - generated Remote namespaces shared with every Session.
+   * @param options - `publish: false` keeps this catalog off the root `sessions` service.
    */
   constructor(
     private readonly rootCtx: Context,
     remote: SessionRemotes,
+    options?: { readonly publish?: boolean },
   ) {
     this.manager = new SessionManager(remote)
     this.list = createSnapshotStore<SessionListState>({
       ids: [], byId: {}, phase: 'pending', projectionsBySession: {},
     })
-    const disposeManagerProjection = this.manager.subscribe(() => { this.projectList() })
-    rootCtx.effect(() => async () => {
-      this.closed = true
-      disposeManagerProjection()
-      const scopes = [...this.scopes]
-      this.scopes.clear()
-      for (const [, record] of scopes) {
-        record.live = false
-        record.session.unbindScope()
-      }
-      const managerDisposal = this.manager.dispose()
-      for (const [id, record] of scopes) {
-        this.startScopeDrop(id, record)
-        this.publishRetention(id)
-      }
-      await this.drainScopeDrops()
-      await managerDisposal
-    }, 'session-controller.client.sessions')
-    rootCtx.reflect.provide('sessions', this, undefined)
+    this.disposeProjection = this.manager.subscribe(() => { this.projectList() })
+    rootCtx.effect(() => async () => { await this.dispose() }, 'session-controller.client.sessions')
+    if (options?.publish !== false) rootCtx.reflect.provide('sessions', this, undefined)
+  }
+
+  /**
+   * Drop every scope and the catalog projection. A second call waits for the first.
+   * @returns when scopes and the manager are quiescent.
+   */
+  dispose(): Promise<void> {
+    if (this.disposal !== undefined) return this.disposal
+    this.closed = true
+    this.disposal = this.shutdown()
+    return this.disposal
+  }
+
+  private async shutdown(): Promise<void> {
+    this.disposeProjection?.()
+    this.disposeProjection = undefined
+    const scopes = [...this.scopes]
+    this.scopes.clear()
+    for (const [, record] of scopes) {
+      record.live = false
+      record.session.unbindScope()
+    }
+    const managerDisposal = this.manager.dispose()
+    for (const [id, record] of scopes) {
+      this.startScopeDrop(id, record)
+      this.publishRetention(id)
+    }
+    await this.drainScopeDrops()
+    await managerDisposal
   }
 
   retain(target: SessionTarget, options: SessionRetainOptions): SessionReference {
@@ -492,7 +509,7 @@ export class ClientSessions implements ISessions {
    * @returns the scoped Context, or undefined without a retained generation.
    */
   scope(id: SessionId): AgentContext | undefined {
-    return this.scopes.get(id)?.ctx
+    return this.scopes.get(id)?.ctx ?? this.externalBindings?.(id)?.ctx
   }
 
   /**
@@ -530,8 +547,12 @@ export class ClientSessions implements ISessions {
     const id = scopeTagOf(ctx)
     if (id === undefined) return undefined
     const record = this.scopes.get(id)
-    return record !== undefined && scopeIdentityOf(record.ctx) === scopeIdentityOf(ctx)
-      ? record.binding.session
+    if (record !== undefined && scopeIdentityOf(record.ctx) === scopeIdentityOf(ctx)) {
+      return record.binding.session
+    }
+    const external = this.externalBindings?.(id)
+    return external !== undefined && scopeIdentityOf(external.ctx) === scopeIdentityOf(ctx)
+      ? external.session
       : undefined
   }
 
@@ -541,7 +562,18 @@ export class ClientSessions implements ISessions {
    * @returns the live binding, or undefined without a retained generation.
    */
   binding(id: SessionId): SessionBinding | undefined {
-    return this.scopes.get(id)?.binding
+    return this.scopes.get(id)?.binding ?? this.externalBindings?.(id)
+  }
+
+  private externalBindings: ((id: SessionId) => SessionBinding | undefined) | undefined
+
+  /**
+   * Read live bindings retained by another Host catalog.
+   * This catalog's own scopes stay authoritative.
+   * @param lookup - foreign bindings, or undefined to stop reading them.
+   */
+  setExternalBindings(lookup: ((id: SessionId) => SessionBinding | undefined) | undefined): void {
+    this.externalBindings = lookup
   }
 
   private retainScope(id: SessionId, source: SessionReferenceSource): ClientSessionReference {

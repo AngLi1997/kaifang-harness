@@ -19,6 +19,7 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { DraftInitializationOptions, SessionInputResolver } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from '../src/client/contract/slots.ts'
+import { dualPlaneStore, setCloudSessionFocus } from '../src/client/host-planes/store.ts'
 import { DirectoryBrowseError, UiWorkspaceService } from '../src/client/navigation.ts'
 import { en, zh } from '../src/client/locales.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
@@ -814,6 +815,28 @@ describe('UiWorkspaceService', () => {
     b.uiWorkspace.startSession()
 
     expect(b.selectPanel).toHaveBeenCalledWith(null)
+  })
+
+  it('leaves a focused cloud Session when New Session or a local Session opens', async () => {
+    const seen: Array<unknown> = []
+    setCloudSessionFocus((binding) => { seen.push(binding) })
+    dualPlaneStore.update((draft) => { draft.sessionPlane = 'cloud' })
+    try {
+      const b = bench({ workspaces: workspaceState([workspace('a')]) })
+      b.uiWorkspace.startSession(wid('a'))
+      expect(seen.at(-1)).toBeUndefined()
+      expect(dualPlaneStore.getSnapshot().sessionPlane).toBe('local')
+      await vi.waitFor(() => {
+        expect(b.sessions.retain).toHaveBeenCalled()
+      })
+      dualPlaneStore.update((draft) => { draft.sessionPlane = 'cloud' })
+      b.uiWorkspace.openSession(sid('created-a'))
+      expect(seen.at(-1)).toBeUndefined()
+      expect(dualPlaneStore.getSnapshot().sessionPlane).toBe('local')
+    } finally {
+      setCloudSessionFocus(undefined)
+      dualPlaneStore.update((draft) => { draft.sessionPlane = 'local' })
+    }
   })
 
   describe('startSession draft initialization', () => {

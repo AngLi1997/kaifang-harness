@@ -57,6 +57,8 @@ After sign-in, the Host registers a model route for the current tenant and user.
 
 The Desktop profile sends platform-model requests to Meta's `harness.chat` capability proxy. Web Host sessions use the AI model proxy. Models configured directly in DSH keep their native providers.
 
+A Desktop local session may also select a model from the signed-in Web Host catalog. The Desktop Host forwards that call to the Web Host model route with the stored platform access token, and the Web Host performs the provider request. A session on the Web Host lists only that Host's models. The catalog carries each model's context window; when a model omits one, the Desktop route still reports a window so switching onto it can compact.
+
 #### KV Cache effect
 
 None.

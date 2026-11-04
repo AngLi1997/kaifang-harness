@@ -147,6 +147,8 @@ function mount(
     entryActions?: boolean
     /** Isolate header capability checks from the composer's required layout observers. */
     headerOnly?: boolean
+    /** Title projection for a session the local list does not contain. */
+    projectedTitle?: string
   } = {},
 ) {
   const sessionId = 'sessionId' in options ? options.sessionId : SID
@@ -240,7 +242,7 @@ function mount(
           useSessionRetainInfo={() => undefined}
           useWorkspaces={props.useWorkspaces}
           {...allowAllAccess}
-          useProjection={(() => undefined)}
+          useProjection={(key => key === 'title' ? options.projectedTitle : undefined) as never}
           useInput={useInput}
           inputActions={inputActions}
           useStore={bindSnapshotSelector(store)}
@@ -499,6 +501,15 @@ describe('ConversationRoot resident composer', () => {
     expect(b.view.queryByRole('button', { name: 'Child' })).toBeNull()
     expect(b.view.getByText('Child').tagName).toBe('SPAN')
     expect(b.view.queryByText('Root')).toBeNull()
+  })
+
+  it('shows the stored title when the local list has no row for the open session', () => {
+    const b = mount(sessionSnapshotOf(), undefined, undefined, {
+      omitSummaryRow: true,
+      projectedTitle: 'Session Title: Welcome and Greeting',
+    })
+    expect(b.view.getByText('Session Title: Welcome and Greeting')).toBeTruthy()
+    expect(b.view.queryByText(SID)).toBeNull()
   })
 
   it('shows hierarchy only for subagents and opens their ordinary owner', () => {

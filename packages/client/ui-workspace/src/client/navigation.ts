@@ -24,6 +24,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
+import { releaseCloudFocus } from './host-planes/store.ts'
 import { readHostPlaneTransport } from './host-planes/transport.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
 
@@ -308,6 +309,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   openSession(target: SessionTarget): void {
+    releaseCloudFocus()
     this.replaceMain(target, this.lifetime.signal, 'reveal')
   }
 
@@ -324,6 +326,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     beforeOpen: ((sessionId: SessionId) => void) | undefined,
     reuse: Pick<StartSessionOptions, 'agentPreset'>,
   ): Promise<void> {
+    releaseCloudFocus()
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     let sessionId: SessionId
     try {
@@ -339,6 +342,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   async openUnassignedSession(beforeOpen?: (sessionId: SessionId) => void): Promise<void> {
+    releaseCloudFocus()
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     let sessionId: SessionId
     try {
@@ -365,6 +369,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
+    releaseCloudFocus()
     const { agentPreset, ...draft } = options ?? {}
     const draftOptions = options === undefined ? undefined : draft
     const initializeDraft = draftOptions !== undefined && (draftOptions.prompt !== undefined

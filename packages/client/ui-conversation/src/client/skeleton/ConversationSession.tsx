@@ -4,6 +4,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { Button, IconEllipsisOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-session-title/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   ConversationSessionHeaderSlotProps, ConversationSessionSlotProps, ConversationViewActionsOwnerProps,
@@ -84,9 +85,10 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  */
 export function ConversationSessionHeader({
   sessionId, hideChrome, useSessions, useConversationViews, useStore,
-  renderSlot, open, selectView, setPinned, t, useEntryPins, useEntryActions,
+  renderSlot, open, selectView, setPinned, t, useEntryPins, useEntryActions, useProjection,
 }: ConversationSessionHeaderProps) {
   const tabs = useConversationViews(value => value)
+  const projectedTitle = useProjection('title')
   const selectedId = useStore(s => s.view)
   const active = resolveActiveView(tabs, selectedId)
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
@@ -176,7 +178,11 @@ export function ConversationSessionHeader({
                     </span>
                   )
                 })}
-                {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
+                {ancestry.length === 0 && (
+                  <span className={css.crumbCurrent}>
+                    {typeof projectedTitle === 'string' && projectedTitle !== '' ? projectedTitle : sessionId}
+                  </span>
+                )}
               </nav>
               <div className={css.headerActions}>
                 {renderSlot('conversation.session.header.actions', {})}

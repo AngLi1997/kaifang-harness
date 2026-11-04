@@ -58,6 +58,10 @@ export interface HostPlaneView {
   readonly streamBaseUrl: string
   readonly ownsHost: boolean
   readonly sidecarApiPrefix?: string
+  /** Shared Host origin while the cloud endpoint exists. The shell socket stays on `streamBaseUrl`. */
+  readonly cloudStreamBaseUrl?: string
+  /** Account key of the cloud endpoint. A change disposes that generation before the next baseline. */
+  readonly cloudAccountKey?: string
 }
 
 export interface KaifangAccountView {

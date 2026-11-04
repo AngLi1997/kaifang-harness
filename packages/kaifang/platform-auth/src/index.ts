@@ -20,6 +20,9 @@ import type { KaifangUserPrincipal } from './identity.ts'
 import { platformModelProviderId, platformUserKey } from './identity.ts'
 import { registerPlatformModelProvider } from './model-provider.ts'
 import {
+  CLOUD_PROXY_PROVIDER, CloudModelProxyAdapter, MODEL_PROXY_PATH, listCloudCatalog, parseProxiedModel, writeProxiedModel,
+} from './cloud-model-proxy.ts'
+import {
   PLATFORM_USER_GLOBAL_ACTIONS,
   PLATFORM_USER_SESSION_ACTIONS,
   PLATFORM_USER_WORKSPACE_ACTIONS,
@@ -910,6 +913,11 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
   if (enabled) await auth.initialize()
   const modelProviders = registerPlatformModelProvider(ctx, resolved.issuer, provider => auth.accessTokenForProvider(provider))
   ctx.provide('kaifangPlatformAuth', { ...auth.handle, ensureModelProvider: modelProviders.ensure })
+  const desktopUserData = process.env.DSH_DESKTOP_USER_DATA
+  if (process.env.ELECTRON_RUN_AS_NODE === '1' && typeof desktopUserData === 'string' && desktopUserData !== '') {
+    ctx.effect(() => ctx.llm.registerAdapter([CLOUD_PROXY_PROVIDER], new CloudModelProxyAdapter(desktopUserData)),
+      'kaifang-platform-auth: cloud model proxy')
+  }
   ctx.inject(['remoteAccess', 'workspaceRegistry'], (accessCtx) => {
     const unregister = accessCtx.remoteAccess.registerPolicy('kaifang-user', {
       bindings: (principal) => {
@@ -1162,6 +1170,45 @@ export async function apply(ctx: Context, config?: PlatformAuthConfig): Promise<
           } catch (error) {
             console.error('[kaifang-platform-auth] could not clear the stored platform session', error)
             writeJson(res, 500, { ok: false })
+          }
+        })),
+        webCtx.webServer.register(route(MODEL_PROXY_PATH, async (req, res) => {
+          if (process.env.ELECTRON_RUN_AS_NODE === '1') { writeText(res, 404, 'not found'); return }
+          if (!checkTrusted(webCtx.connection, req, res)) return
+          const bearer = bearerAccessToken(req.headers as ConnectionTrustRequest['headers'])
+          if (bearer === undefined || auth.sessionIdForAccessToken(bearer) === undefined) {
+            writeText(res, 401, 'unauthorized')
+            return
+          }
+          if (req.method === 'GET') {
+            writeJson(res, 200, { groups: await listCloudCatalog(ctx.llm) })
+            return
+          }
+          if (req.method !== 'POST') { writeText(res, 405, 'method not allowed'); return }
+          let body: unknown
+          try { body = await readJsonBody(req, 8_000_000) }
+          catch (error) {
+            writeText(res, 400, error instanceof Error ? error.message : 'invalid model proxy request')
+            return
+          }
+          const parsed = parseProxiedModel(body)
+          if (!parsed.ok) {
+            writeText(res, 400, parsed.reason === 'media'
+              ? 'images and files stay on the desktop session'
+              : 'invalid model proxy request')
+            return
+          }
+          const abort = new AbortController()
+          const stop = (): void => { abort.abort() }
+          req.on('aborted', stop)
+          req.on('close', stop)
+          try { await writeProxiedModel(ctx.llm, parsed.options, res, abort.signal) }
+          catch (error) {
+            if (!res.headersSent) writeText(res, 502, error instanceof Error ? error.message : 'model proxy failed')
+            else if (!res.writableEnded) res.end()
+          } finally {
+            req.off('aborted', stop)
+            req.off('close', stop)
           }
         })),
       ]

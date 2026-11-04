@@ -21,7 +21,7 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import { distinguishingPathSuffixes } from './path-suffix.ts'
 import css from './WorkspacePicker.module.css'
-import { dualPlaneStore, setActivePlane } from './host-planes/index.ts'
+import { dualPlaneStore, openCloudWorkspaceSession } from './host-planes/index.ts'
 
 const ADD_WORKSPACE = '::add-workspace'
 const NO_WORKSPACE = '::no-workspace'
@@ -156,23 +156,37 @@ export function WorkspacePickFlow({
   const activePlaneItems: MenuEntry[] = listed.map(({ id, title, path, suffix }) =>
     toWorkspaceItem(id, title, path, suffix))
   const sidecarItems = (plane: 'local' | 'cloud'): MenuEntry[] => sidecarWorkspaces.map(({ workspaceId, title }) =>
-    toWorkspaceItem(`::plane:${plane}:${workspaceId}`, title))
-  const items: MenuEntry[] = pinFooter
-    ? showPlanes
-      ? [
-        { type: 'label', id: 'plane-local', text: t('plane.local') },
-        ...dualPlane.activePlane === 'local' ? activePlaneItems : sidecarItems('local'),
-        { type: 'label', id: 'plane-cloud', text: t('plane.cloud') },
-        ...dualPlane.activePlane === 'cloud' ? activePlaneItems : sidecarItems('cloud'),
-      ]
-      : activePlaneItems
-    : addOnly ? addEntries : [
-      ...unassignedEntries,
-      ...(unassignedEntries.length > 0 && addEntries.length > 0
-        ? [{ type: 'separator' as const, id: 'workspace-choice-separator' }]
-        : []),
-      ...addEntries,
-    ]
+    toWorkspaceItem(`::plane:${plane}:${workspaceId}`, workspaceDisplayTitle(title, defaultWorkspaceName)))
+  const sectionItems = (plane: 'local' | 'cloud'): MenuEntry[] =>
+    dualPlane.activePlane === plane
+      ? (pinFooter ? activePlaneItems : unassignedEntries)
+      : sidecarItems(plane)
+  const planeMenu: MenuEntry[] = [
+    { type: 'label', id: 'plane-local', text: t('plane.local') },
+    ...sectionItems('local'),
+    { type: 'label', id: 'plane-cloud', text: t('plane.cloud') },
+    ...sectionItems('cloud'),
+  ]
+  const items: MenuEntry[] = addOnly
+    ? addEntries
+    : showPlanes
+      ? pinFooter
+        ? planeMenu
+        : [
+          ...planeMenu,
+          ...(addEntries.length > 0
+            ? [{ type: 'separator' as const, id: 'workspace-choice-separator' }, ...addEntries]
+            : []),
+        ]
+      : pinFooter
+        ? activePlaneItems
+        : [
+          ...unassignedEntries,
+          ...(unassignedEntries.length > 0 && addEntries.length > 0
+            ? [{ type: 'separator' as const, id: 'workspace-choice-separator' }]
+            : []),
+          ...addEntries,
+        ]
   const footer: MenuEntry[] | undefined = pinFooter
     ? [
       ...unassignedEntries,
@@ -254,7 +268,14 @@ export function WorkspacePickFlow({
     if (planePick !== null) {
       const plane = planePick[1] as 'local' | 'cloud'
       const workspaceId = planePick[2] as WorkspaceId
-      void setActivePlane(plane).then(() => { onPick(workspaceId) })
+      if (plane === 'cloud') {
+        void openCloudWorkspaceSession(workspaceId).catch((error: unknown) => {
+          console.error('cloud session open failed:', error)
+        })
+        onClose()
+        return
+      }
+      onPick(workspaceId)
       return
     }
     onPick(id as WorkspaceId)

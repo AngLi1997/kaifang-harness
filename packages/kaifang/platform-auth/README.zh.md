@@ -60,6 +60,8 @@ Host 提供 `ctx.kaifangPlatformAuth`；Host 集成必须传入当前 Peer 的 `
 
 Desktop profile 的平台模型通过 Meta 的 `harness.chat` capability 代理调用；Web Host 会话使用 AI 模型代理。直接在 DSH 中配置的模型仍使用各自的原生 provider。
 
+桌面端本地会话还可以选择已登录 Web Host 公布的模型。桌面 Host 用已保存的平台访问令牌把这次调用转发到 Web Host 的模型路由，由 Web Host 向提供方发请求。Web Host 上的会话只列出该 Host 的模型。目录带上每个模型的上下文窗口；模型没有公布窗口时，桌面路由仍报告一个窗口，这样切换后可以压缩。
+
 #### KV Cache effect
 
 无。

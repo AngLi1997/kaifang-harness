@@ -1056,3 +1056,50 @@ it('restores the account model name after login without changing the saved route
   expect(screen.getByRole('button', { name: /选择模型，当前/ }).textContent).toBe('DeepSeek FlashHigh')
   expect(directory.getSnapshot().current).toEqual(selected)
 })
+
+function planeStore(snapshot: {
+  cloudOnline: boolean
+  activePlane: 'local' | 'cloud'
+  sessionPlane: 'local' | 'cloud'
+  sidecarModelGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
+}) {
+  return { subscribe: () => () => {}, getSnapshot: () => snapshot }
+}
+
+it('lets a local session select a cloud model and hides local models from a cloud session', () => {
+  const cloudModels = [{ id: 'openai', name: 'Qwen', models: [{ id: 'qwen3.5-9b', name: 'qwen3.5-9b' }] }]
+  const directory = createSnapshotStore(state())
+  const select = vi.fn().mockResolvedValue({ ok: true, value: undefined })
+  const selectCloud = vi.fn().mockResolvedValue({ ok: true, value: undefined })
+  vi.stubGlobal('__DSH_DUAL_PLANE__', planeStore({
+    cloudOnline: true, activePlane: 'local', sessionPlane: 'local', sidecarModelGroups: cloudModels,
+  }))
+  vi.stubGlobal('__DSH_SELECT_CLOUD_MODEL__', selectCloud)
+  const view = render(<ModelSelect
+    renderSlot={renderLabel} locked={false} available directory={directory}
+    load={vi.fn()} select={select} t={t}
+  />)
+  fireEvent.click(screen.getByRole('button', { name: /选择模型，当前/ }))
+  fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+  expect(screen.getByText('本机')).toBeTruthy()
+  expect(screen.getByText('云端')).toBeTruthy()
+  const cloudRow = screen.getByRole('menuitemradio', { name: 'qwen3.5-9b' })
+  expect((cloudRow as HTMLButtonElement).disabled).toBe(false)
+  fireEvent.click(cloudRow)
+  expect(select).toHaveBeenCalledWith({ provider: 'dsh-cloud-proxy', model: `${encodeURIComponent('openai')}/${encodeURIComponent('qwen3.5-9b')}` })
+  expect(selectCloud).not.toHaveBeenCalled()
+
+  view.unmount()
+  vi.stubGlobal('__DSH_DUAL_PLANE__', planeStore({
+    cloudOnline: true, activePlane: 'local', sessionPlane: 'cloud', sidecarModelGroups: cloudModels,
+  }))
+  render(<ModelSelect renderSlot={renderLabel} locked={false} available directory={directory} load={vi.fn()} select={select} t={t} />)
+  fireEvent.click(screen.getByRole('button', { name: /选择模型|请选择模型/ }))
+  const modelRow = screen.queryByRole('menuitem', { name: /模型/ })
+  if (modelRow !== null) fireEvent.click(modelRow)
+  expect(screen.queryByRole('menuitemradio', { name: 'DeepSeek-V4-Flash' })).toBeNull()
+  expect(screen.queryByText('本机')).toBeNull()
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'qwen3.5-9b' }))
+  expect(selectCloud).toHaveBeenCalledWith({ provider: 'openai', model: 'qwen3.5-9b' })
+  vi.unstubAllGlobals()
+})

@@ -35,6 +35,7 @@ import {
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelCatalogModel } from '@deepseek-ai/dsh-api-session-controller/types'
 import {
   IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconCloseFillRegular,
   IconDataOutlineRegular, IconWarningOutlineRegular, Input, isMobileDevice, rankByName, StateDot, Toast,
@@ -47,7 +48,33 @@ import { orderModelProviders } from './provider-order.ts'
 interface DualPlaneMenuSnapshot {
   cloudOnline: boolean
   activePlane: 'local' | 'cloud'
+  sessionPlane?: 'local' | 'cloud'
   sidecarModelGroups: readonly { id: string; name: string; models: readonly { id: string; name: string }[] }[]
+}
+
+/** Desktop Host provider that forwards a Web Host catalog model. The id matches the Host adapter. */
+const CLOUD_PROXY_PROVIDER = 'dsh-cloud-proxy'
+
+/**
+ * Encode a Web Host provider and model for the Desktop proxy route.
+ * @param provider - provider id from the Web Host catalog.
+ * @param model - model id from that provider.
+ * @returns the id stored on a local session.
+ */
+function encodeCloudModel(provider: string, model: string): string {
+  return `${encodeURIComponent(provider)}/${encodeURIComponent(model)}`
+}
+
+type CloudModelResult = { ok: true; value: undefined } | { ok: false; error: { code: string; message: string } }
+
+function selectCloudModel(selection: ModelSelection): Promise<CloudModelResult> {
+  const select = (globalThis as {
+    __DSH_SELECT_CLOUD_MODEL__?: (selection: ModelSelection) => Promise<CloudModelResult>
+  }).__DSH_SELECT_CLOUD_MODEL__
+  if (select === undefined) {
+    return Promise.resolve({ ok: false, error: { code: 'cloud/offline', message: 'cloud workspace is offline' } })
+  }
+  return select(selection)
 }
 
 interface DualPlaneMenuStore {
@@ -58,6 +85,7 @@ interface DualPlaneMenuStore {
 const OFFLINE_DUAL_PLANE_MENU: DualPlaneMenuSnapshot = {
   cloudOnline: false,
   activePlane: 'local',
+  sessionPlane: 'local',
   sidecarModelGroups: [],
 }
 
@@ -135,8 +163,22 @@ export function ModelSelect(
       name: group.id === 'deepseek-account' ? accountProviderName : group.name,
     },
   })), [state.groups, accountProviderName])
-  const choices = useMemo(() => groups.flatMap(group =>
-    group.models.map(model => ({
+  const sessionPlane = dualPlane.sessionPlane === 'cloud' ? 'cloud' : 'local'
+  const hiddenLocal = useMemo(() => groups.slice(0, 0), [groups])
+  const localSource = sessionPlane === 'cloud' ? hiddenLocal : groups
+  const cloudSource = dualPlane.cloudOnline ? dualPlane.sidecarModelGroups : OFFLINE_DUAL_PLANE_MENU.sidecarModelGroups
+  const showSearch = localSource.reduce((count, group) => count + group.models.length, 0)
+    + cloudSource.reduce((count, group) => count + group.models.length, 0) > 4
+  const needle = showSearch ? query.trim() : ''
+  const filteredGroups = useMemo(() => localSource.map(group => ({
+    ...group, models: rankByName(group.models, needle),
+  })).filter(group => group.models.length > 0), [localSource, needle])
+  const cloudGroups = useMemo(() => cloudSource.map(group => ({
+    ...group,
+    models: rankByName(group.models.map(model => ({ id: model.id, name: model.name })), needle),
+  })).filter(group => group.models.length > 0), [cloudSource, needle])
+  const choices = useMemo(() => [
+    ...localSource.flatMap(group => group.models.map(model => ({
       group,
       model,
       selection: {
@@ -146,14 +188,31 @@ export function ModelSelect(
           ? {}
           : { reasoningEffort: model.reasoning.defaultEffort },
       } satisfies ModelSelection,
-    }))), [groups])
-  const showSearch = choices.length > 4
-  const filteredGroups = useMemo(() => groups.map(group => ({
-    ...group, models: rankByName(group.models, showSearch ? query.trim() : ''),
-  })).filter(group => group.models.length > 0), [groups, query, showSearch])
-  const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map(model => ({
-    provider: group.id, model: model.id,
-  }))), [filteredGroups])
+    }))),
+    ...cloudSource.flatMap(group => group.models.map((model) => {
+      const listed: ModelCatalogModel = { id: model.id, name: model.name }
+      return {
+        group: {
+          id: group.id,
+          name: group.name,
+          models: group.models,
+          provider: { id: group.id, name: group.name },
+        },
+        model: listed,
+        selection: (sessionPlane === 'cloud'
+          ? { provider: group.id, model: model.id }
+          : { provider: CLOUD_PROXY_PROVIDER, model: encodeCloudModel(group.id, model.id) }) satisfies ModelSelection,
+      }
+    })),
+  ], [localSource, cloudSource, sessionPlane])
+  const visibleModels = useMemo(() => [
+    ...filteredGroups.flatMap(group => group.models.map(model => ({ provider: group.id, model: model.id }))),
+    ...cloudGroups.flatMap(group => group.models.map(model => (
+      sessionPlane === 'cloud'
+        ? { provider: group.id, model: model.id }
+        : { provider: CLOUD_PROXY_PROVIDER, model: encodeCloudModel(group.id, model.id) }
+    ))),
+  ], [filteredGroups, cloudGroups, sessionPlane])
   const currentVisibleIndex = visibleModels.findIndex(model =>
     model.provider === state.current?.provider && model.model === state.current.model)
   const activeModelIndex = Math.min(highlightedIndex ?? Math.max(0, currentVisibleIndex), visibleModels.length - 1)
@@ -241,7 +300,7 @@ export function ModelSelect(
     const viewport = groupsRef.current
     if (viewport === null) return
     return observeStickyMenuGroups(viewport)
-  }, [available, open, pane, filteredGroups])
+  }, [available, open, pane, filteredGroups, cloudGroups])
 
   useLayoutEffect(() => {
     if (open && pane === 'model' && activeModelIndex >= 0) {
@@ -438,6 +497,23 @@ export function ModelSelect(
       closeAfterSelection()
       return
     }
+    if (sessionPlane === 'cloud') {
+      lastActionRef.current = 'select'
+      setSelectionFocus(true)
+      triggerRef.current?.focus()
+      void selectCloudModel(selection).then((result) => {
+        if (result.ok) {
+          if (rootRef.current !== null) closeAfterSelection()
+          return
+        }
+        toastSeq.current += 1
+        setToast({
+          seq: toastSeq.current,
+          text: t('error.action', { message: `${result.error.code}: ${result.error.message}` }),
+        })
+      })
+      return
+    }
     submit(selection)
   }
 
@@ -611,12 +687,10 @@ export function ModelSelect(
                 className={clsx(css.groups, 'scrollable')}
                 role="menu"
                 aria-label={t('menu.model')}
-                hidden={filteredGroups.length === 0}
+                hidden={filteredGroups.length === 0 && cloudGroups.length === 0}
               >
-                {dualPlane.cloudOnline && (
-                  <div className={css.planeSection} data-host-plane={dualPlane.activePlane}>
-                    {dualPlane.activePlane === 'local' ? '本机' : '云端'}
-                  </div>
+                {dualPlane.cloudOnline && sessionPlane === 'local' && filteredGroups.length > 0 && (
+                  <div className={css.planeSection} data-host-plane="local">{t('plane.local')}</div>
                 )}
                 {filteredGroups.map((group) => {
                   return (
@@ -660,27 +734,58 @@ export function ModelSelect(
                     </MenuGroup>
                   )
                 })}
+                {cloudGroups.length > 0 && (
+                  <>
+                    <div className={css.planeSection} data-host-plane="cloud">{t('plane.cloud')}</div>
+                    {cloudGroups.map(group => (
+                      <MenuGroup key={`cloud-${group.id}`} label={group.name}>
+                        {group.models.map((model) => {
+                          const index = modelIndex++
+                          const selection: ModelSelection = sessionPlane === 'cloud'
+                            ? { provider: group.id, model: model.id }
+                            : { provider: CLOUD_PROXY_PROVIDER, model: encodeCloudModel(group.id, model.id) }
+                          const selected = state.current?.provider === selection.provider && state.current.model === selection.model
+                          return (
+                            <button
+                              ref={itemRef()}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={selected}
+                              id={`${id}-model-${index}`}
+                              tabIndex={showSearch ? -1 : 0}
+                              onFocus={() => { setHighlightedIndex(index) }}
+                              data-highlighted={index === activeModelIndex ? '' : undefined}
+                              className={clsx(
+                                css.option, css.modelOption, selected && css.selected, index === activeModelIndex && css.optionActive,
+                              )}
+                              onMouseMove={busy || index === activeModelIndex ? undefined : () => {
+                                if (showSearch) setHighlightedIndex(index)
+                                else itemRefs.current[index]?.focus()
+                              }}
+                              key={model.id}
+                              title={model.name}
+                              disabled={busy}
+                              onClick={() => { choose(selection) }}
+                            >
+                              <span className={css.optionCopy}>
+                                <span className={css.modelName}>{renderModelLabel(
+                                  { id: group.id, name: group.name }, model, 'option', selected,
+                                )}</span>
+                              </span>
+                              <span className={css.check}>
+                                {pending?.provider === selection.provider && pending.model === selection.model
+                                  ? <StateDot state="ongoing" />
+                                  : selected ? <IconCheckOutlineRegular /> : null}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </MenuGroup>
+                    ))}
+                  </>
+                )}
               </div>
-              {dualPlane.cloudOnline && (
-                <>
-                  <div className={css.planeSection} data-host-plane={dualPlane.activePlane === 'local' ? 'cloud' : 'local'}>
-                    {dualPlane.activePlane === 'local' ? '云端' : '本机'}
-                  </div>
-                  {dualPlane.sidecarModelGroups.length === 0
-                    ? <button type="button" className={css.item} disabled>{dualPlane.activePlane === 'local' ? '云端不可用' : '本机不可用'}</button>
-                    : dualPlane.sidecarModelGroups.flatMap(group => group.models.map(model => (
-                      <button
-                        key={`sidecar-${group.id}-${model.id}`}
-                        type="button"
-                        className={css.item}
-                        disabled
-                      >
-                        <span className={css.itemLabel}>{model.name}</span>
-                      </button>
-                    )))}
-                </>
-              )}
-              {state.status === 'ready' && filteredGroups.length === 0 && (
+              {state.status === 'ready' && filteredGroups.length === 0 && cloudGroups.length === 0 && (
                 <div className={css.empty} role="status">{t(choices.length === 0 ? 'empty.models' : 'search.empty')}</div>
               )}
             </>

@@ -53,7 +53,7 @@ import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashRep
 import { openWelcomeWindow } from './welcome-window.ts'
 import { needsWelcome, type PlatformBrowserSignInResult, type PlatformPasswordCredentials, type PlatformPasswordSignInResult } from './welcome-api.ts'
 import { PlatformBrowserSignIn, refreshPlatformSession } from './platform-browser-sign-in.ts'
-import { clearPlatformSession, hasPlatformSession, readPlatformSession, writePlatformSession, type PlatformSession, type PlatformSessionUser } from './platform-session.ts'
+import { clearCloudHostOrigin, clearPlatformSession, desktopCloudAccountKey, hasPlatformSession, readPlatformSession, writeCloudHostOrigin, writePlatformSession, type PlatformSession, type PlatformSessionUser } from './platform-session.ts'
 import { connectDesktopWelcome, type DesktopWelcomeBackend } from './welcome-backend.ts'
 import { DesktopUpdateJournal } from './update-journal.ts'
 import { DesktopUpdatePreparationError } from './update-error.ts'
@@ -464,7 +464,12 @@ async function main(): Promise<void> {
   let activePlane: HostPlaneId = 'local'
   let sharedHostUrl: string | undefined
   let sharedHostCookie: string | undefined
+  /** `desktopCloudAccountKey` of the platform user that owns the cloud endpoint. */
+  let cloudAccountKey: string | undefined
   const useLocalHostTransport = (): void => {
+    void clearCloudHostOrigin(app.getPath('userData')).catch((error: unknown) => {
+      console.warn('desktop shared Host: could not clear the cloud origin', error)
+    })
     if (localHostUrl === undefined || localHostCookie === undefined) return
     hostUrl = localHostUrl
     hostCookie = localHostCookie
@@ -473,6 +478,7 @@ async function main(): Promise<void> {
     activePlane = 'local'
     sharedHostUrl = undefined
     sharedHostCookie = undefined
+    cloudAccountKey = undefined
   }
   const applyActivePlane = (): void => {
     if (!cloudOnline || sharedHostUrl === undefined || sharedHostCookie === undefined
@@ -480,7 +486,7 @@ async function main(): Promise<void> {
       useLocalHostTransport()
       return
     }
-    const planes = resolvePlaneHosts(activePlane, {
+    const planes = resolvePlaneHosts({
       localUrl: localHostUrl,
       localCookie: localHostCookie,
       cloudUrl: sharedHostUrl,
@@ -488,13 +494,15 @@ async function main(): Promise<void> {
     })
     hostUrl = planes.active.hostUrl
     hostCookie = planes.active.hostCookie
-    ownsHostTransport = activePlane === 'local'
+    ownsHostTransport = true
   }
   const hostPlaneSnapshot = (): HostPlaneView => {
     const transport = desktopDualPlaneBoot({
       cloudOnline,
       activePlane,
       activeHostUrl: hostUrl ?? localHostUrl ?? 'http://127.0.0.1:0',
+      ...sharedHostUrl === undefined ? {} : { cloudHostUrl: sharedHostUrl },
+      ...cloudAccountKey === undefined ? {} : { cloudAccountKey },
     })
     return {
       cloudOnline: transport.cloudOnline,
@@ -502,6 +510,8 @@ async function main(): Promise<void> {
       streamBaseUrl: transport.streamBaseUrl,
       ownsHost: transport.ownsHost,
       ...transport.sidecarApiPrefix === undefined ? {} : { sidecarApiPrefix: transport.sidecarApiPrefix },
+      ...transport.cloudStreamBaseUrl === undefined ? {} : { cloudStreamBaseUrl: transport.cloudStreamBaseUrl },
+      ...transport.cloudAccountKey === undefined ? {} : { cloudAccountKey: transport.cloudAccountKey },
     }
   }
   const publishHostPlane = (): HostPlaneView => {
@@ -591,8 +601,12 @@ async function main(): Promise<void> {
     }
     sharedHostUrl = result.hostUrl
     sharedHostCookie = result.cookie
+    void writeCloudHostOrigin(userData, new URL(result.hostUrl).origin).catch((error: unknown) => {
+      console.warn('desktop shared Host: could not store the cloud origin', error)
+    })
+    cloudAccountKey = session === undefined ? undefined : desktopCloudAccountKey(session.user)
     cloudOnline = true
-    // Dual-plane (B): default active plane is 本机 so new chats land locally; 云端 is sidecar.
+    // The shell stays on the embedded Host. The cloud section follows this account's ticket.
     activePlane = 'local'
     applyActivePlane()
     console.info(
@@ -661,7 +675,7 @@ async function main(): Promise<void> {
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
-      hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion() }, onFailure,
+      hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion(), DSH_DESKTOP_USER_DATA: app.getPath('userData') }, onFailure,
       primaryRuntime,
       resources, (next) => { platformView.setSession(next) })
     return {
@@ -930,7 +944,7 @@ async function main(): Promise<void> {
       // injections); /api and auth status use the shared Host kaifang-user Peer.
       const sidecar = cloudOnline && sharedHostUrl !== undefined && sharedHostCookie !== undefined
         && localHostUrl !== undefined && localHostCookie !== undefined
-        ? resolvePlaneHosts(activePlane, {
+        ? resolvePlaneHosts({
           localUrl: localHostUrl,
           localCookie: localHostCookie,
           cloudUrl: sharedHostUrl,
@@ -966,6 +980,8 @@ async function main(): Promise<void> {
       cloudOnline,
       activePlane,
       activeHostUrl: hostUrl,
+      ...sharedHostUrl === undefined ? {} : { cloudHostUrl: sharedHostUrl },
+      ...cloudAccountKey === undefined ? {} : { cloudAccountKey },
     })
     if (!desktopFollowTransportAligned({
       ownsHost: transport.ownsHost,
@@ -981,6 +997,8 @@ async function main(): Promise<void> {
       cloudOnline: transport.cloudOnline,
       activePlane: transport.activePlane,
       ...transport.sidecarApiPrefix === undefined ? {} : { sidecarApiPrefix: transport.sidecarApiPrefix },
+      ...transport.cloudStreamBaseUrl === undefined ? {} : { cloudStreamBaseUrl: transport.cloudStreamBaseUrl },
+      ...transport.cloudAccountKey === undefined ? {} : { cloudAccountKey: transport.cloudAccountKey },
     }
   })
 
@@ -1482,6 +1500,8 @@ async function main(): Promise<void> {
     const window = mainWindow ?? createMainWindow()
     // Remount only when activation moved local → shared Host Peer world.
     if (switchedToSharedHost) navigation = undefined
+    // Cold start loads this document before sign-in. Reusing it must still deliver the cloud endpoint.
+    const documentAlreadyLoaded = navigation?.window === window && navigation.url === applicationUrl
     await navigateMain(applicationUrl)
     if (isQuitting() || recovery.active || window.isDestroyed()) return
     if (activate) window.show()
@@ -1503,6 +1523,7 @@ async function main(): Promise<void> {
     if (activate && development && process.env.DSH_DESKTOP_OPEN_DEVTOOLS !== '0') {
       window.webContents.openDevTools({ mode: 'detach' })
     }
+    if (documentAlreadyLoaded && !window.isDestroyed()) publishHostPlane()
   }
   openSharedHarness = async (): Promise<boolean> => {
     if (quitting) return false
@@ -1589,10 +1610,14 @@ async function main(): Promise<void> {
   const completePlatformSession = async (sessionValue: PlatformSession): Promise<void> => {
     await writePlatformSession(app.getPath('userData'), sessionValue)
     publishPlatformAccount(toKaifangAccountView(sessionValue.user))
+    const alreadyInWorkspace = enteredWorkspace
+      && mainWindow !== undefined && !mainWindow.isDestroyed()
     await activateSharedHostIfPossible()
-    navigation = undefined
+    if (alreadyInWorkspace) {
+      publishHostPlane()
+      return
+    }
     await enterWorkspace()
-    if (mainWindow !== undefined && !mainWindow.isDestroyed()) await navigateMain(applicationUrl)
   }
   const startBrowserSignIn = async (): Promise<PlatformBrowserSignInResult> => {
     if (quitting) return { ok: false, reason: 'cancelled' }
@@ -1633,12 +1658,8 @@ async function main(): Promise<void> {
     }
     publishPlatformAccount(undefined)
     useLocalHostTransport()
-    navigation = undefined
-    if (mainWindow !== undefined && !mainWindow.isDestroyed() && enteredWorkspace) {
-      await navigateMain(applicationUrl)
-    }
+    publishHostPlane()
     if (!needsWelcome(await readWelcomeState()) || isQuitting()) return
-    enteredWorkspace = false
     await showWelcome()
   }
   const requestPlatformSignOut = (): void => {
