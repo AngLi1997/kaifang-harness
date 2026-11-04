@@ -74,6 +74,7 @@ async function bench(access: ClientAccessState, options: { ungroupedSession?: Se
     { 'sidebar.workspaces': { kind: 'single', scope: 'root' } } as never,
     SidebarFrame as never,
   )
+  runtime.ctx.provide('connection', { reconnect() {} } as never)
   await runtime.mount({ inject: [...inject], apply })
   return runtime
 }

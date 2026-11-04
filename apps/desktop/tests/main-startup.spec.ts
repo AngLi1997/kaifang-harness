@@ -574,10 +574,11 @@ describe('desktop main startup', () => {
     const submenu = applicationMenuItems()
     const options = harness.app.setAboutPanelOptions.mock.calls[0]![0]
     const expected = JSON.parse(readFileSync(new URL('./expected/about-panel.json', import.meta.url), 'utf8')) as Record<string, unknown>
-    expect(submenu.slice(0, 3).map(item => item.label)).toEqual([
-      en.openApplication, en.sharedHarnessSettingsMenu, en.openLocalWorkspaceMenu,
+    const messages = locale === 'zh-CN' ? zh : en
+    expect(submenu.slice(0, 4).map(item => item.label)).toEqual([
+      messages.openApplication, messages.sharedHarnessSettingsMenu, messages.openSharedHarnessMenu, messages.openLocalWorkspaceMenu,
     ])
-    const [about, separator] = submenu.slice(4, 6)
+    const [about, separator] = submenu.slice(5, 7)
     expect({ menu: [{ label: about!.label, role: about!.role }, separator], options: { ...options, iconPath: '<app icon>' } })
       .toEqual(expected[`${platform}:${locale}`])
     expect(options.iconPath).toBe(packaged ? join('desktop-test-resources', 'icon.png')
@@ -587,10 +588,10 @@ describe('desktop main startup', () => {
     harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 0 })
     ;(about!.click as () => void)()
     await vi.advanceTimersByTimeAsync(0)
-    const zh = locale === 'zh-CN'
+    const chinese = locale === 'zh-CN'
     expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
-      detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
+      type: 'info', title: chinese ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
+      detail: chinese ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [chinese ? '确定' : 'OK'], cancelId: 0,
     }))
     // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
     harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
@@ -816,6 +817,11 @@ describe('desktop main startup', () => {
     try {
       vi.stubEnv('DSH_DESKTOP_UPDATE_JOURNAL_DIR', directory)
       await readyForUpdate()
+      await vi.waitFor(() => {
+        const files = readdirSync(directory)
+        expect(files).toHaveLength(1)
+        expect(readFileSync(join(directory, files[0]!), 'utf8')).toContain('"event":"workspace-ready"')
+      })
       harness.publishUpdate({ phase: 'error', failedOperation: 'download', version: '1.2.3', message: 'ENOSPC secret-url' })
       const checkUpdates = applicationMenuItems().find(item => item.label === en.checkUpdatesMenu)!.click as () => void
       checkUpdates()
@@ -1007,6 +1013,7 @@ describe('desktop main startup', () => {
     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
     const application = handler(event, 'application', 48, 34)
     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
+      zh.openApplication, zh.sharedHarnessSettingsMenu, zh.openSharedHarnessMenu, zh.openLocalWorkspaceMenu, 'separator',
       '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
     ])
     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
@@ -1043,9 +1050,10 @@ describe('desktop main startup', () => {
       ? ['Desktop test', en.fileMenu, 'editMenu', 'windowMenu']
       : ['Application', 'editMenu'])
     const application = template[0]!.submenu as MenuItemConstructorOptions[]
+    const productCommands = [en.openApplication, en.sharedHarnessSettingsMenu, en.openSharedHarnessMenu, en.openLocalWorkspaceMenu, 'separator']
     expect(application.filter(item => item.visible !== false).map(describeItem)).toEqual(platform === 'darwin'
-      ? ['about', 'separator', en.checkUpdatesMenu, en.cliCommandMenu, 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']
-      : ['about', 'separator', en.checkUpdatesMenu, 'separator', 'quit'])
+      ? [...productCommands, 'about', 'separator', en.checkUpdatesMenu, en.cliCommandMenu, 'separator', 'hide', 'hideOthers', 'unhide', 'separator', 'quit']
+      : [...productCommands, 'about', 'separator', en.checkUpdatesMenu, 'separator', 'quit'])
     expect(harness.menu.setApplicationMenu).toHaveBeenCalledOnce()
   })
 
@@ -1158,7 +1166,9 @@ describe('desktop main startup', () => {
     await harness.hostStarted.promise
     expect(settled).toBe(false)
     harness.hosts[0]!.ready.resolve()
-    await expect(boot).resolves.toEqual({ injections: [], streamBaseUrl: 'http://127.0.0.1:3080', ownsHost: true })
+    await expect(boot).resolves.toEqual({
+      injections: [], streamBaseUrl: 'http://127.0.0.1:3080', ownsHost: true, cloudOnline: false, activePlane: 'local',
+    })
     expect(harness.windows[0]!.urls).toEqual(['dsh-app://app/'])
   })
 
@@ -1705,7 +1715,8 @@ describe('desktop main startup', () => {
     expect(modal.isDestroyed()).toBe(false)
     await vi.advanceTimersByTimeAsync(150)
     expect(modal.isDestroyed()).toBe(false)
-    expect(modal.webContents.send.mock.calls.at(-1)).toMatchObject([MANDATORY_IPC.state, { policy: { blocking: false } }])
+    expect(modal.webContents.send.mock.calls.filter(call => call[0] === MANDATORY_IPC.state).at(-1))
+      .toMatchObject([MANDATORY_IPC.state, { policy: { blocking: false } }])
     expect(host.stop).not.toHaveBeenCalled()
     expect(request.mock.calls[0]![1]!.headers).toMatchObject({
       'x-client-bundle-id': '', 'x-client-platform': 'desktop-win', 'x-client-version': '1.2.3',
@@ -2128,7 +2139,9 @@ describe('desktop main startup', () => {
     expect(replacement.updateTasks).not.toHaveBeenCalled()
     replacement.ready.resolve()
     await vi.waitFor(() => { expect(harness.windows[0]!.urls).toEqual(['dsh-app://app/', 'dsh-app://app/']) })
-    await expect(Promise.resolve(invoke(DESKTOP_IPC.boot))).resolves.toEqual({ injections: [], streamBaseUrl: 'http://127.0.0.1:3099', ownsHost: true })
+    await expect(Promise.resolve(invoke(DESKTOP_IPC.boot))).resolves.toEqual({
+      injections: [], streamBaseUrl: 'http://127.0.0.1:3099', ownsHost: true, cloudOnline: false, activePlane: 'local',
+    })
     if (mandatory) await answerMandatory('later')
     await expect(retry).resolves.toBe(false)
     expect(replacement.updateTasks.mock.calls).toEqual([['inspect']])
