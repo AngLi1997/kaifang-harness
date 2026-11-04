@@ -12,8 +12,17 @@ export interface HostPlaneTransport {
 
 export interface SidecarSessionRow {
   readonly sessionId: string
+  /** Stored title. Empty when the Host has no title; the sidebar localizes that as unnamed. */
   readonly title: string
   readonly workspaceId?: string
+  /** Epoch ms from the session list. Absent when the list omitted a finite time. */
+  readonly updatedAt?: number
+}
+
+export interface SidecarGroup {
+  readonly key: string
+  readonly title: string
+  readonly sessions: readonly SidecarSessionRow[]
 }
 
 export interface SidecarWorkspaceRow {

@@ -72,6 +72,12 @@
   margin-right: -4px;
 }
 
+/* A plane header sits in the list seat, which already insets the row. */
+.root:not(.rail) .listArea > .sectionHeader {
+  margin-right: 0;
+  padding-left: 0;
+}
+
 .sectionLabel {
   flex: none;
   max-width: 45%;
@@ -87,6 +93,21 @@
     opacity 120ms var(--ds-ease-in-out),
     transform 180ms var(--ds-ease-in-out),
     visibility 0s linear;
+}
+
+.planeSectionLabel {
+  flex: none;
+  position: relative;
+  margin: 10px 8px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.sectionLabelPlane {
+  flex: 0 1 auto;
+  max-width: calc(100% - 96px);
 }
 
 .sectionLabelHidden {
@@ -314,6 +335,19 @@
   padding-left: 4px;
   /* The list remains the scroll clip. This seat stays visible so the
      absolutely positioned first-boundary marker can occupy the header gap. */
+  overflow: visible;
+}
+
+/* Two planes share one scroller. A live tree must keep its content height,
+   or its flex growth covers the following plane caption. */
+.listAreaDual {
+  overflow-y: auto;
+}
+
+.listAreaDual .treeBody,
+.listAreaDual .list {
+  flex: none;
+  min-height: auto;
   overflow: visible;
 }
 

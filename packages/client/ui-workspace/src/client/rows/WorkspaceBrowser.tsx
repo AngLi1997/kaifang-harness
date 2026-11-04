@@ -40,7 +40,8 @@ import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
-import { CloudDisconnectToast, dualPlaneStore, PlaneHeader, SidecarPlaneList } from '../host-planes/index.ts'
+import { CloudDisconnectToast, dualPlaneStore, setActivePlane, SidecarPlaneList } from '../host-planes/index.ts'
+import type { HostPlaneId } from '../host-planes/types.ts'
 
 /**
  * Column slide length (--ds-transition-duration-slow): rail-search focus waits it out —
@@ -1029,6 +1030,29 @@ export function WorkspaceBrowser({
     }
     open(sessionId)
   }
+  const listRef = useRef(list)
+  listRef.current = list
+  const archivedRef = useRef(archivedSessionIds)
+  archivedRef.current = archivedSessionIds
+  const sidecarOpenSeq = useRef(0)
+  const openSidecarSession = (plane: HostPlaneId, sessionId: SessionId): void => {
+    const seq = ++sidecarOpenSeq.current
+    void (async () => {
+      try {
+        await setActivePlane(plane)
+        if (sidecarOpenSeq.current !== seq) return
+        const listed = await waitForListedSession(sessionId, () => listRef.current)
+        if (sidecarOpenSeq.current !== seq || !listed) return
+        if (archivedRef.current.includes(sessionId)) {
+          notifyArchivedNotOpenable()
+          return
+        }
+        open(sessionId)
+      } catch (error: unknown) {
+        console.error('sidecar session open failed:', error)
+      }
+    })()
+  }
   const leaveArchivedOnly = (): void => { actions.setArchivedFilter('default') }
   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
   const mainSessionId = Object.values(list.byId)
@@ -1136,6 +1160,9 @@ export function WorkspaceBrowser({
   // does not silently drop an in-progress filter.
   const [query, setQuery] = useState('')
   const [searchExpanded, setSearchExpanded] = useState(false)
+  // Which header owns the shared query. `single` follows the active Host.
+  const [searchPlane, setSearchPlane] = useState<'single' | HostPlaneId>('single')
+  const [pickerAnchor, setPickerAnchor] = useState<'single' | HostPlaneId>('single')
   const [revealSessionId, setRevealSessionId] = useState<SessionId | undefined>(undefined)
   const normalizedQuery = sanitizeSearchQuery(query).trim()
   const [remoteSearch, setRemoteSearch] = useState<RemoteSearchState>({
@@ -1150,6 +1177,8 @@ export function WorkspaceBrowser({
   // states; the menu anchors on this button).
   const wsPickerOpen = shortcutState.addRequested
   const wsPlusRef = useRef<HTMLButtonElement>(null)
+  const cloudPlusRef = useRef<HTMLButtonElement>(null)
+  const localPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
 
   const openSearchResult = (sessionId: SessionId): void => {
@@ -1184,6 +1213,7 @@ export function WorkspaceBrowser({
   useEffect(() => {
     if (shortcutState.searchRequest === 0) return
     closeAddWorkspace()
+    setSearchPlane(showPlanes ? dualPlane.activePlane : 'single')
     setSearchExpanded(true)
     if (!wide) {
       setSearchOnExpand(true)
@@ -1194,7 +1224,7 @@ export function WorkspaceBrowser({
   useEffect(() => {
     if (!wide || !searchExpanded || searchOnExpand) return
     searchInput.current?.focus({ preventScroll: true })
-  }, [wide, searchExpanded, searchOnExpand])
+  }, [wide, searchExpanded, searchOnExpand, searchPlane])
 
   // Outside-click dismissal stays off while the rail gesture is in flight
   // (searchOnExpand): the rail click flips the shell wide and mounts this
@@ -1214,7 +1244,8 @@ export function WorkspaceBrowser({
   }, [normalizedQuery, wide, searchExpanded, searchOnExpand])
 
   useEffect(() => {
-    if (normalizedQuery === '') {
+    const owner = !showPlanes || searchPlane === 'single' ? dualPlane.activePlane : searchPlane
+    if (normalizedQuery === '' || (showPlanes && owner !== dualPlane.activePlane)) {
       setRemoteSearch({ query: '', status: 'idle', items: [], hasMore: false })
       return
     }
@@ -1248,7 +1279,7 @@ export function WorkspaceBrowser({
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [normalizedQuery, searchSessions])
+  }, [normalizedQuery, searchSessions, showPlanes, searchPlane, dualPlane.activePlane])
 
   // Rename dialog (browser-owned so it outlives row unmounts during collapse).
   // The stored title decides whether confirming is a real rename; the draft is
@@ -1368,48 +1399,69 @@ export function WorkspaceBrowser({
     })
   }
 
-  return (
-    <div className={clsx(css.root, !wide && css.rail)}>
-      <CloudDisconnectToast text={t('plane.cloudDisconnected')} />
+  const queryFor = (plane: HostPlaneId): string => {
+    if (!showPlanes) return normalizedQuery
+    const owner = searchPlane === 'single' ? dualPlane.activePlane : searchPlane
+    return owner === plane ? normalizedQuery : ''
+  }
+  const addPlane: 'single' | HostPlaneId = !showPlanes || pickerAnchor === 'single'
+    ? (showPlanes ? dualPlane.activePlane : 'single')
+    : pickerAnchor
+  const addAnchorRef = addPlane === 'cloud' ? cloudPlusRef : addPlane === 'local' ? localPlusRef : wsPlusRef
+  const openAdd = (plane: 'single' | HostPlaneId): void => {
+    const target: HostPlaneId = plane === 'single' ? dualPlane.activePlane : plane
+    setPickerAnchor(showPlanes ? target : 'single')
+    if (showPlanes && dualPlane.activePlane !== target) {
+      void setActivePlane(target).then(() => { requestAddWorkspace() })
+      return
+    }
+    requestAddWorkspace()
+  }
+  const renderSectionHeader = (plane: 'single' | HostPlaneId, label: string) => {
+    const expanded = searchExpanded && (plane === 'single' ? !showPlanes || searchPlane === 'single' : searchPlane === plane)
+    const plusRef = plane === 'cloud' ? cloudPlusRef : plane === 'local' ? localPlusRef : wsPlusRef
+    const openSearch = (): void => {
+      closeAddWorkspace()
+      setSearchPlane(plane === 'single' ? (showPlanes ? dualPlane.activePlane : 'single') : plane)
+      setSearchExpanded(true)
+    }
+    return (
       <div className={css.sectionHeader}>
         {wide && (
-          <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>
-            {groupBy === 'flat' ? t('section.sessions') : t('section.workspaces')}
+          <span className={clsx(css.sectionLabel, plane !== 'single' && css.sectionLabelPlane, css.wide, expanded && css.sectionLabelHidden)}>
+            {label}
           </span>
         )}
         {wide && (
-          <div className={clsx(css.searchSlot, searchExpanded && css.searchSlotExpanded)}>
+          <div className={clsx(css.searchSlot, expanded && css.searchSlotExpanded)}>
             <div
-              ref={searchRoot}
-              className={clsx(css.search, searchExpanded && css.searchExpanded)}
-              onClick={() => {
-                closeAddWorkspace()
-                setSearchExpanded(true)
-                searchInput.current?.focus()
-              }}
+              ref={expanded ? searchRoot : undefined}
+              className={clsx(css.search, expanded && css.searchExpanded)}
+              onClick={openSearch}
             >
-              <Tooltip label={t('search')} shortcutKeys={searchShortcut?.keys} side="bottom" delayMs={500} disabled={searchExpanded}>
+              <Tooltip label={t('search')} shortcutKeys={searchShortcut?.keys} side="bottom" delayMs={500} disabled={expanded}>
                 <button
                   type="button"
                   className={css.searchButton}
                   aria-label={t('search.sessions.aria')}
                   aria-keyshortcuts={searchShortcut?.aria}
-                  aria-expanded={searchExpanded}
-                  onClick={() => {
-                    requestSearch()
+                  aria-expanded={expanded}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    openSearch()
                   }}
                 >
-                  <IconSearchOutlineRegular size={searchExpanded ? 11 : 14} />
+                  <IconSearchOutlineRegular size={expanded ? 11 : 14} />
                 </button>
               </Tooltip>
               <input
-                ref={searchInput}
+                ref={expanded ? searchInput : undefined}
                 className={css.searchInput}
                 type="text"
                 placeholder={t('search.placeholder')}
                 maxLength={SEARCH_QUERY_MAX_CODE_UNITS}
                 value={query}
-                tabIndex={searchExpanded ? 0 : -1}
+                tabIndex={expanded ? 0 : -1}
                 onChange={(e) => { setQuery(sanitizeSearchQuery(e.target.value)) }}
                 onKeyDown={(e) => {
                   if (e.key !== 'Escape') return
@@ -1417,7 +1469,7 @@ export function WorkspaceBrowser({
                   setSearchExpanded(false)
                 }}
               />
-              {searchExpanded && (
+              {expanded && (
                 <button
                   type="button"
                   className={css.clearButton}
@@ -1434,7 +1486,7 @@ export function WorkspaceBrowser({
             </div>
           </div>
         )}
-        <div className={clsx(css.headerActions, wide && searchExpanded && css.headerActionsHidden)}>
+        <div className={clsx(css.headerActions, wide && expanded && css.headerActionsHidden)}>
           {wide && (
             <ViewOptionsMenu
               groupBy={groupBy}
@@ -1452,40 +1504,48 @@ export function WorkspaceBrowser({
           {directoryFlowAvailable && (
             <Tooltip label={t('workspace.add')} shortcutKeys={addShortcut?.keys} side="bottom" delayMs={500}>
               <button
-                ref={wsPlusRef}
+                ref={plusRef}
                 type="button"
                 className={css.iconButton}
                 aria-label={t('workspace.add')}
                 aria-keyshortcuts={addShortcut?.aria}
-                onClick={() => {
-                  requestAddWorkspace()
-                }}
+                onClick={() => { openAdd(plane) }}
               >
                 <IconProjectAddOutlineRegular size={wide ? 16 : 18} />
               </button>
             </Tooltip>
           )}
         </div>
-        {/* Add flow + its error dialog (same package — direct composition). */}
-        <WorkspacePickFlow
-          t={t}
-          open={wsPickerOpen}
-          anchorRef={wsPlusRef}
-          useWorkspaces={useWorkspaces}
-          createWorkspace={createWorkspace}
-          useDirectoryFlow={useDirectoryFlow}
-          renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
-          addOnly
-          onBusyChange={setDirectoryBusy}
-          side="right"
-          onPick={(workspaceId) => {
-            closeAddWorkspace()
-            if (workspaceId === null) return
-            startSession(workspaceId, { clearPreviousDraft: false })
-          }}
-          onClose={() => { closeAddWorkspace() }}
-        />
       </div>
+    )
+  }
+
+  return (
+    <div className={clsx(css.root, !wide && css.rail)}>
+      <CloudDisconnectToast text={t('plane.cloudDisconnected')} />
+      {(!wide || !showPlanes) && renderSectionHeader(
+        'single',
+        groupBy === 'flat' ? t('section.sessions') : t('section.workspaces'),
+      )}
+      {/* Add flow + its error dialog (same package — direct composition). */}
+      <WorkspacePickFlow
+        t={t}
+        open={wsPickerOpen}
+        anchorRef={addAnchorRef}
+        useWorkspaces={useWorkspaces}
+        createWorkspace={createWorkspace}
+        useDirectoryFlow={useDirectoryFlow}
+        renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
+        addOnly
+        onBusyChange={setDirectoryBusy}
+        side="right"
+        onPick={(workspaceId) => {
+          closeAddWorkspace()
+          if (workspaceId === null) return
+          startSession(workspaceId, { clearPreviousDraft: false })
+        }}
+        onClose={() => { closeAddWorkspace() }}
+      />
 
       {/* The collapsed rail keeps search as its own 36px control. */}
       {!wide && <div className={css.search}>
@@ -1506,19 +1566,21 @@ export function WorkspaceBrowser({
 
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
-      <div className={css.listArea}>
-        {wide && showPlanes && (
-          <PlaneHeader
-            plane="local"
-            active={dualPlane.activePlane === 'local'}
-            label={t('plane.local')}
-            currentLabel={t('plane.current')}
+      <div className={clsx(css.listArea, showPlanes && css.listAreaDual)}>
+        {wide && showPlanes && renderSectionHeader('cloud', t('section.cloudWorkspaces'))}
+        {wide && showPlanes && dualPlane.activePlane !== 'cloud' && (
+          <SidecarPlaneList
+            plane="cloud"
+            emptyLabel={t('plane.sidecarEmpty')}
+            untitledLabel={t('session.untitled')}
+            defaultWorkspaceName={t('workspace.defaultName')}
+            query={queryFor('cloud')}
+            noMatchesLabel={t('search.noMatches')}
+            t={t}
+            onOpenSession={(sessionId) => { openSidecarSession('cloud', sessionId) }}
           />
         )}
-        {wide && showPlanes && dualPlane.activePlane !== 'local' && (
-          <SidecarPlaneList plane="local" emptyLabel={t('empty.none')} ungroupedLabel={t('group.ungrouped')} onOpenSession={guardedOpen} />
-        )}
-        {wide && (!showPlanes || dualPlane.activePlane === 'local') && (normalizedQuery !== ''
+        {wide && showPlanes && dualPlane.activePlane === 'cloud' && (queryFor('cloud') !== ''
           ? (
             <SearchResults
               usePanelInfo={usePanelInfo}
@@ -1606,18 +1668,20 @@ export function WorkspaceBrowser({
               />
             ))}
 
-        {wide && showPlanes && (
-          <PlaneHeader
-            plane="cloud"
-            active={dualPlane.activePlane === 'cloud'}
-            label={t('plane.cloud')}
-            currentLabel={t('plane.current')}
+        {wide && showPlanes && renderSectionHeader('local', t('section.localWorkspaces'))}
+        {wide && showPlanes && dualPlane.activePlane !== 'local' && (
+          <SidecarPlaneList
+            plane="local"
+            emptyLabel={t('empty.none')}
+            untitledLabel={t('session.untitled')}
+            defaultWorkspaceName={t('workspace.defaultName')}
+            query={queryFor('local')}
+            noMatchesLabel={t('search.noMatches')}
+            t={t}
+            onOpenSession={(sessionId) => { openSidecarSession('local', sessionId) }}
           />
         )}
-        {wide && showPlanes && dualPlane.activePlane !== 'cloud' && (
-          <SidecarPlaneList plane="cloud" emptyLabel={t('plane.sidecarEmpty')} ungroupedLabel={t('group.ungrouped')} onOpenSession={guardedOpen} />
-        )}
-        {wide && showPlanes && dualPlane.activePlane === 'cloud' && (normalizedQuery !== ''
+        {wide && (!showPlanes || dualPlane.activePlane === 'local') && (queryFor('local') !== ''
           ? (
             <SearchResults
               usePanelInfo={usePanelInfo}
@@ -1796,4 +1860,28 @@ export function WorkspaceBrowser({
       </Modal>
     </div>
   )
+}
+
+const SIDECAR_OPEN_WAIT_MS = 8_000
+
+/** Poll until the active Host's session catalog contains the id, or the wait expires. */
+function waitForListedSession(
+  sessionId: SessionId,
+  read: () => SessionListState,
+): Promise<boolean> {
+  const started = Date.now()
+  return new Promise((resolve) => {
+    const tick = (): void => {
+      if (read().byId[sessionId] !== undefined) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - started >= SIDECAR_OPEN_WAIT_MS) {
+        resolve(false)
+        return
+      }
+      setTimeout(tick, 50)
+    }
+    tick()
+  })
 }

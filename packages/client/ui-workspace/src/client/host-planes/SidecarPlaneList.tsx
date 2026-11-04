@@ -1,99 +1,145 @@
-/** Compact inactive-plane session list (sidecar snapshot; ops stay on that plane after switch). */
+/** Inactive-plane workspaces, drawn with the same folder and session rows as the live tree. */
 
-import { useSyncExternalStore, type ReactNode } from 'react'
+import { useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react'
+import clsx from 'clsx'
+import {
+  IconFolderCloseRegular, IconFolderOpenRegular, IconTriangleRightFillRegular, relativeTime,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import css from './host-planes.module.css'
-import { dualPlaneStore, setActivePlane } from './store.ts'
+import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import rowCss from '../rows/Rows.module.css'
+import listCss from '../rows/WorkspaceBrowser.module.css'
+import { groupSidecarSessions } from './sidecar-rpc.ts'
+import { dualPlaneStore } from './store.ts'
 import type { HostPlaneId } from './types.ts'
 
-export function PlaneHeader({
-  plane,
-  active,
-  label,
-  currentLabel,
-}: {
-  plane: HostPlaneId
-  active: boolean
-  label: string
-  currentLabel: string
-}): ReactNode {
-  return (
-    <div className={`${css.planeHeader}${active ? ` ${css.planeHeaderActive}` : ''}`} data-host-plane={plane}>
-      <span>{label}</span>
-      {active ? <span className={css.planeBadge}>{currentLabel}</span> : null}
-    </div>
-  )
+type Translate = WorkspaceBrowserProps['t']
+
+function sessionTime(updatedAt: number | undefined, now: number, t: Translate): string | undefined {
+  if (updatedAt === undefined) return undefined
+  const { unit, n } = relativeTime(updatedAt, now)
+  return unit === 'now' ? t('time.now') : t(`time.${unit}`, { n })
 }
 
-export function SidecarPlaneList({
-  plane,
-  emptyLabel,
-  ungroupedLabel,
-  onOpenSession,
-}: {
+/** Inactive-plane folder list inputs. */
+interface SidecarPlaneListProps {
+  /** Host the snapshot belongs to. */
   plane: HostPlaneId
+  /** Copy when that Host has no workspaces. */
   emptyLabel: string
-  ungroupedLabel: string
+  /** Copy for a session with no stored title. */
+  untitledLabel: string
+  /** Localized name of the default workspace. */
+  defaultWorkspaceName: string
+  /** Workspace dictionary, including relative-time labels. */
+  t: Translate
+  /** Opens the session after that Host's catalog lists it. */
   onOpenSession: (sessionId: SessionId) => void
-}): ReactNode {
+  /** Case-insensitive title filter. Empty shows the full snapshot. */
+  query?: string
+  /** Copy when a non-empty query matches nothing. */
+  noMatchesLabel?: string
+}
+
+/**
+ * Folder rows for the inactive Host.
+ * @param props - inactive-plane list inputs.
+ * @returns the folder list, or the empty copy.
+ */
+export function SidecarPlaneList(props: SidecarPlaneListProps): ReactNode {
+  const {
+    plane,
+    emptyLabel,
+    untitledLabel,
+    defaultWorkspaceName,
+    t,
+    onOpenSession,
+    query = '',
+    noMatchesLabel = emptyLabel,
+  } = props
   const snapshot = useSyncExternalStore(
     fn => dualPlaneStore.subscribe(fn),
     () => dualPlaneStore.getSnapshot(),
   )
-  const sessionsByWorkspace = new Map<string, (typeof snapshot.sidecarSessions)[number][]>()
-  const ungrouped: (typeof snapshot.sidecarSessions)[number][] = []
-  for (const session of snapshot.sidecarSessions) {
-    if (session.workspaceId === undefined) {
-      ungrouped.push(session)
-      continue
-    }
-    const rows = sessionsByWorkspace.get(session.workspaceId) ?? []
-    rows.push(session)
-    sessionsByWorkspace.set(session.workspaceId, rows)
+  const groups = groupSidecarSessions(
+    snapshot.sidecarWorkspaces,
+    snapshot.sidecarSessions,
+    defaultWorkspaceName,
+  )
+  const [collapsed, setCollapsed] = useState<Readonly<Record<string, boolean>>>({})
+  const needle = query.trim().toLocaleLowerCase()
+  const visibleGroups = needle === '' ? groups : groups.flatMap((group) => {
+    const titleHit = group.title.toLocaleLowerCase().includes(needle)
+    const sessions = titleHit
+      ? group.sessions
+      : group.sessions.filter((row) => {
+        const title = row.title !== '' ? row.title : untitledLabel
+        return title.toLocaleLowerCase().includes(needle)
+      })
+    if (!titleHit && sessions.length === 0) return []
+    return [{ ...group, sessions }]
+  })
+  if (visibleGroups.length === 0) {
+    return <div className={listCss.empty}>{needle === '' ? emptyLabel : noMatchesLabel}</div>
   }
-  if (snapshot.sidecarWorkspaces.length === 0 && snapshot.sidecarSessions.length === 0) {
-    return <div className={css.sidecarEmpty}>{emptyLabel}</div>
-  }
+  const now = Date.now()
   return (
-    <div className={css.sidecarList} data-host-plane={plane}>
-      {snapshot.sidecarWorkspaces.map(workspace => (
-        <section className={css.sidecarWorkspace} key={workspace.workspaceId}>
-          <div className={css.sidecarWorkspaceTitle}>{workspace.title}</div>
-          {(sessionsByWorkspace.get(workspace.workspaceId) ?? []).map(row => (
-            <button
-              key={row.sessionId}
-              type="button"
-              className={css.sidecarRow}
-              onClick={() => {
-                void setActivePlane(plane).then(() => {
-                  onOpenSession(row.sessionId as SessionId)
-                })
-              }}
+    <div data-host-plane={plane}>
+      {visibleGroups.map((group) => {
+        const open = collapsed[group.key] === false
+          || (collapsed[group.key] !== true && group.sessions.length > 0)
+        const toggle = (): void => {
+          setCollapsed(prev => ({ ...prev, [group.key]: open }))
+        }
+        return (
+          <div className={listCss.groupSection} key={group.key}>
+            <div
+              className={rowCss.projectRow}
+              role="treeitem"
+              aria-expanded={open}
+              onClick={toggle}
             >
-              <span className={css.sidecarTitle}>{row.title}</span>
-            </button>
-          ))}
-        </section>
-      ))}
-      {ungrouped.length > 0 && (
-        <section className={css.sidecarWorkspace}>
-          <div className={css.sidecarWorkspaceTitle}>{ungroupedLabel}</div>
-          {ungrouped.map(row => (
-            <button
-              key={row.sessionId}
-              type="button"
-              className={css.sidecarRow}
-              onClick={() => {
-                void setActivePlane(plane).then(() => {
-                  onOpenSession(row.sessionId as SessionId)
-                })
-              }}
-            >
-              <span className={css.sidecarTitle}>{row.title}</span>
-            </button>
-          ))}
-        </section>
-      )}
+              <span className={clsx(rowCss.slot, rowCss.folder, open && rowCss.folderActive)}>
+                {open ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
+              </span>
+              <span className={clsx(rowCss.slot, rowCss.chevron)}>
+                <IconTriangleRightFillRegular className={clsx(rowCss.arrow, open && rowCss.arrowOpen)} />
+              </span>
+              <span className={rowCss.projectText}>
+                <span className={rowCss.title}>{group.title}</span>
+              </span>
+            </div>
+            {open && group.sessions.map((row) => {
+              const title = row.title !== '' ? row.title : untitledLabel
+              const time = sessionTime(row.updatedAt, now, t)
+              const openRow = (): void => { onOpenSession(row.sessionId as SessionId) }
+              const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+                if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+                event.preventDefault()
+                openRow()
+              }
+              return (
+                <div
+                  key={row.sessionId}
+                  className={rowCss.sessionRow}
+                  role="treeitem"
+                  tabIndex={0}
+                  onClick={openRow}
+                  onKeyDown={onKeyDown}
+                >
+                  <span className={rowCss.slot} />
+                  <span className={rowCss.title}>{title}</span>
+                  {time !== undefined && (
+                    <span className={rowCss.rowResting}>
+                      <span className={rowCss.time}>{time}</span>
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
     </div>
   )
 }
